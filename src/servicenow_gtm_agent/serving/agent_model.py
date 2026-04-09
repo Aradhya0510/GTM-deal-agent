@@ -14,8 +14,14 @@ import uuid
 from typing import Generator
 
 import mlflow
-from databricks.agents import LangGraphResponsesAgent, ResponsesAgentRequest, ResponsesAgentResponse
-from databricks.agents import ResponsesAgentStreamEvent
+from mlflow.pyfunc import ResponsesAgent
+from mlflow.types.responses import (
+    ResponsesAgentRequest,
+    ResponsesAgentResponse,
+    ResponsesAgentStreamEvent,
+    output_to_responses_items_stream,
+    to_chat_completions_input,
+)
 from databricks.agents.lakebase import CheckpointSaver
 
 from servicenow_gtm_agent.config import AgentConfig, load_config
@@ -26,7 +32,7 @@ from servicenow_gtm_agent.state import DealState
 CONFIG = load_config("configs/default.yaml")
 
 
-class GTMDealAgent(LangGraphResponsesAgent):
+class GTMDealAgent(ResponsesAgent):
     """Stateful GTM Deal Intelligence Agent.
 
     Short-term: LangGraph checkpoints persisted to Lakebase per thread_id.
@@ -34,43 +40,29 @@ class GTMDealAgent(LangGraphResponsesAgent):
     Time travel: pass checkpoint_id in custom_inputs to branch from a prior state.
     """
 
-    def _create_graph(self, checkpointer):
-        """Build the LangGraph pipeline wired to the Lakebase checkpointer."""
-        return build_graph(CONFIG, checkpointer=checkpointer)
+    def _build(self, checkpointer=None, memory_prefix=""):
+        """Build the LangGraph pipeline, optionally with checkpointer and memory."""
+        graph, tools = build_graph(
+            checkpointer=checkpointer, memory_prefix=memory_prefix
+        )
+        return graph
 
     # ── Non-streaming prediction ─────────────────────────────────────────
 
     def predict(self, request: ResponsesAgentRequest) -> ResponsesAgentResponse:
-        custom_inputs = dict(request.custom_inputs or {})
-
-        if "thread_id" not in custom_inputs:
-            custom_inputs["thread_id"] = str(uuid.uuid4())
-        request.custom_inputs = custom_inputs
-
-        # Collect stream events into a response
         outputs = [
             event.item
             for event in self.predict_stream(request)
             if event.type == "response.output_item.done"
         ]
-
-        # Surface thread_id and checkpoint_id for the App to persist
-        custom_outputs = {"thread_id": custom_inputs["thread_id"]}
-        try:
-            history = self.get_checkpoint_history(custom_inputs["thread_id"], limit=1)
-            if history:
-                custom_outputs["checkpoint_id"] = history[0]["checkpoint_id"]
-        except Exception:
-            pass
-
-        return ResponsesAgentResponse(output=outputs, custom_outputs=custom_outputs)
+        return ResponsesAgentResponse(output=outputs)
 
     # ── Streaming prediction ─────────────────────────────────────────────
 
     def predict_stream(
         self, request: ResponsesAgentRequest
     ) -> Generator[ResponsesAgentStreamEvent, None, None]:
-        custom_inputs = request.custom_inputs or {}
+        custom_inputs = getattr(request, "custom_inputs", None) or {}
         thread_id = custom_inputs.get("thread_id", str(uuid.uuid4()))
         checkpoint_id = custom_inputs.get("checkpoint_id")  # For time-travel branching
 
@@ -78,25 +70,25 @@ class GTMDealAgent(LangGraphResponsesAgent):
         if checkpoint_id:
             checkpoint_config["configurable"]["checkpoint_id"] = checkpoint_id
 
+        messages = to_chat_completions_input([m.model_dump() for m in request.input])
+
         with CheckpointSaver(
             instance_name=CONFIG.lakebase.instance_name,
             schema_name=CONFIG.lakebase.memory_schema,
         ) as checkpointer:
-            graph = self._create_graph(checkpointer)
-            inputs = self.prep_msgs_for_cc_llm([i.model_dump() for i in request.input])
+            graph = self._build(checkpointer=checkpointer)
 
             for event in graph.stream(
-                {
-                    "messages": inputs,
-                    "thread_id": thread_id,
-                    "ae_id": custom_inputs.get("ae_id", ""),
-                    "account_id": custom_inputs.get("account_id", ""),
-                    "opp_id": custom_inputs.get("opp_id", ""),
-                },
+                {"messages": messages},
                 config=checkpoint_config,
-                stream_mode="values",
+                stream_mode=["updates"],
             ):
-                yield from self._convert_to_stream_events(event)
+                if event[0] == "updates":
+                    for node_data in event[1].values():
+                        if node_data.get("messages"):
+                            yield from output_to_responses_items_stream(
+                                node_data["messages"]
+                            )
 
     # ── Checkpoint history (for time travel UI) ──────────────────────────
 
@@ -107,7 +99,7 @@ class GTMDealAgent(LangGraphResponsesAgent):
             instance_name=CONFIG.lakebase.instance_name,
             schema_name=CONFIG.lakebase.memory_schema,
         ) as cp:
-            graph = self._create_graph(cp)
+            graph = self._build(checkpointer=cp)
             history = []
             for state in graph.get_state_history(config):
                 if len(history) >= limit:

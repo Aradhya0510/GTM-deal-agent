@@ -10,11 +10,13 @@ GTM Deal Intelligence Agent — a LangGraph tool-calling agent on Databricks tha
 
 ## Architecture
 
-**Production agent** (`deployment/agent.py`): Single LangGraph graph with a tool-calling loop.
+**Production agent** (`deployment/agent.py`): Single LangGraph graph with a tool-calling loop + two-tier memory.
 
 ```
-User query → agent node (Claude Sonnet 4.6) → tool calls? → yes → tools node → back to agent
-                                               → no  → END (return response)
+User query → load long-term memory (SQL API) → agent node (Claude Sonnet 4.6) → tool calls? → yes → tools node → back to agent
+                                                                                → no  → END
+Short-term: App sends full conversation history (client-side replay) + MemorySaver (in-process)
+Long-term:  Delta memory tables → SQL Statement Execution API → system prompt prefix
 ```
 
 5 tools available:
@@ -23,6 +25,24 @@ User query → agent node (Claude Sonnet 4.6) → tool calls? → yes → tools 
 - `gtm_transcripts_idx` (Vector Search) — 7 Gong call transcripts
 - `gtm_battlecards_idx` (Vector Search) — 4 competitive battlecards
 - `gtm_stories_idx` (Vector Search) — 5 won/lost deal stories
+
+### Memory Architecture
+
+**Short-term** (multi-turn within a session):
+- App sends **full conversation history** as `input` (not just the latest message) — client-side replay
+- `thread_id` tracked per session in `st.session_state` and passed via `custom_inputs`
+- `MemorySaver` (in-process) provides additional checkpointing within a single replica
+- Enables follow-ups: "make it shorter", "try a different angle"
+
+**Long-term** (cross-session persistence):
+- At session start: `_load_memory_prefix()` queries 3 Delta tables via **SQL Statement Execution API** (`warehouse_id: 75fd8278393d07eb`) and prepends to system prompt
+- At session end: `_extract_and_store_memories()` runs haiku extraction agent and writes back via SQL API
+- Tables: `users.aradhya_chouhan.memory_ae_profiles`, `memory_account_context`, `memory_deal_decisions`
+- Memory extraction triggered via `save_memories: true` in `custom_inputs`
+
+**Why not Lakebase?** The `databricks.sdk.WorkspaceClient` on e2-demo-west doesn't expose `.lakebase` — SDK is too old. Memory tables are Delta tables queried via the SQL Statement Execution API instead.
+
+**Prerequisite**: Memory Delta tables created via `deployment/lakebase_memory_setup.py` notebook + demo data seeded.
 
 ### Critical: Correct SDK Imports
 
@@ -44,13 +64,17 @@ from mlflow.models.resources import DatabricksServingEndpoint, DatabricksFunctio
 # from databricks.agents import create_agent_executor  # NO!
 ```
 
-`databricks-agents` (v1.9.4) is a **deployment-only** SDK — it provides `deploy()`, `get_deployments()`, etc. Agent building uses `mlflow` + `databricks_langchain`.
+`databricks-agents` (v1.9.4) is a **deployment-only** SDK — it provides `deploy()`, `get_deployments()`, etc. Agent building uses `mlflow` + `databricks_langchain`. Exception: `databricks.agents.lakebase.CheckpointSaver` is valid for LangGraph checkpointing.
 
 ### Key Files
 
-- **`deployment/agent.py`** — Standalone agent definition + `mlflow.models.set_model()`. This is what Model Serving loads. Must NOT contain any logging/deployment code.
+- **`deployment/agent.py`** — Standalone agent definition + `mlflow.models.set_model()`. This is what Model Serving loads. Includes inline memory loading (SQL API) / extraction (haiku). Must NOT contain any logging/deployment code.
 - **`deployment/log_and_deploy_notebook.py`** — Databricks notebook that calls `mlflow.pyfunc.log_model(python_model="agent.py")` and `agents.deploy()`. Separate from agent.py to avoid infinite recursion.
-- **`src/servicenow_gtm_agent/graph.py`** — Reusable graph builder for local dev.
+- **`deployment/lakebase_memory_setup.py`** — Notebook that creates Delta memory tables and seeds demo data. Run on workspace as a serverless job.
+- **`app/app.py`** — Streamlit app with full conversation replay, thread_id tracking, AE selector, and Lakebase Memory badge.
+- **`src/servicenow_gtm_agent/graph.py`** — Reusable graph builder for local dev (accepts checkpointer + memory_prefix).
+- **`src/servicenow_gtm_agent/memory/`** — Two-tier memory layer (reference implementation): `short_term.py`, `long_term.py`, `prompt_builder.py`.
+- **`src/servicenow_gtm_agent/agents/memory_extractor.py`** — Haiku-based extraction (ChatDatabricks, no tools).
 - **`src/servicenow_gtm_agent/tools/`** — Tool wrappers using `databricks_langchain`.
 - **`configs/e2_demo_west.yaml`** — Workspace-specific config (catalog, schema, endpoints, index names).
 
@@ -97,6 +121,15 @@ The `env:` section with `value_from: workspace` / `value_from: token` causes `[E
 ### 11. Agent endpoint timeout: use 300s for complex queries
 Multi-tool queries (5+ tool calls) can take 2-3 minutes. The default SDK timeout (60s) causes timeouts. Set `Config(http_timeout_seconds=300)` when calling the agent endpoint from the app.
 
+### 12. Lakebase SDK not available on e2-demo-west — use Delta + SQL API
+`WorkspaceClient().lakebase` doesn't exist (SDK too old). Workaround: store memory in Delta tables and query via `w.statement_execution.execute_statement(warehouse_id="75fd8278393d07eb")`. Works from Model Serving with auth passthrough.
+
+### 13. MemorySaver doesn't persist across endpoint replicas
+`langgraph.checkpoint.memory.MemorySaver` is in-process only. Multi-turn breaks if requests hit different replicas. Fix: send full conversation history from the app (client-side replay) instead of relying on server-side checkpointing.
+
+### 14. PySpark Row() with complex types fails on serverless
+`spark.createDataFrame([Row(...)])` with `ARRAY<STRING>` or `datetime` fields causes `CANNOT_DETERMINE_TYPE`. Fix: use SQL INSERT statements directly via `spark.sql("INSERT INTO ...")` instead of DataFrame writes.
+
 ## Commands
 
 ```bash
@@ -111,27 +144,58 @@ ruff format src/ tests/                   # Format
 
 Infrastructure in `setup/` — run as Databricks notebooks:
 1. `00_create_catalog_schema.sql` — UC catalog + schemas
-2. `01_lakebase_schema.sql` — Lakebase CRM + memory tables
-3. `04_seed_demo_data.py` — Demo data (run before VS indexes)
+2. `01_lakebase_schema.sql` — Lakebase CRM tables (if Lakebase available)
+3. `04_seed_demo_data.py` — CRM demo data (run before VS indexes)
 4. `02_vector_search_indexes.py` — 3 delta-sync indexes (use existing warmed endpoint!)
 5. `03_uc_functions.sql` — UC TABLE Function tools
-6. `05_uc_governance.sql` — RLS + column masking
-7. `06_lakewatch_rules.py` — Security detection rules
+6. `deployment/lakebase_memory_setup.py` — Delta memory tables + seed data (run as serverless job)
+7. `05_uc_governance.sql` — RLS + column masking
+8. `06_lakewatch_rules.py` — Security detection rules
 
 ## Deployment
 
+All deployment uses `databricks --profile e2-demo-west`:
+
 ```bash
 # 1. Upload agent.py to workspace
-databricks workspace import /Workspace/Users/.../agent.py --file deployment/agent.py
+databricks --profile e2-demo-west workspace import \
+  /Workspace/Users/aradhya.chouhan@databricks.com/servicenow-gtm-agent/agent.py \
+  --file deployment/agent.py --format AUTO --overwrite
 
-# 2. Upload and run log_and_deploy notebook (logs model + deploys endpoint)
-databricks workspace import /Users/.../log_and_deploy --file deployment/log_and_deploy_notebook.py --format SOURCE --language PYTHON
+# 2. Upload and run memory setup notebook (creates Delta memory tables + seeds data)
+databricks --profile e2-demo-west workspace import \
+  /Workspace/Users/aradhya.chouhan@databricks.com/servicenow-gtm-agent/lakebase_memory_setup \
+  --file deployment/lakebase_memory_setup.py --format SOURCE --language PYTHON --overwrite
 
-# 3. Submit as serverless job
-# See deployment/log_and_deploy_notebook.py — it handles log_model + register + deploy
+databricks --profile e2-demo-west jobs submit --json '{
+  "run_name": "memory-tables-setup",
+  "tasks": [{"task_key": "setup", "notebook_task": {
+    "notebook_path": "/Workspace/Users/aradhya.chouhan@databricks.com/servicenow-gtm-agent/lakebase_memory_setup",
+    "source": "WORKSPACE"}, "environment_key": "default"}],
+  "environments": [{"environment_key": "default", "spec": {"client": "2", "dependencies": []}}]
+}'
+
+# 3. Re-log and deploy agent (submit log_and_deploy notebook as serverless job)
+databricks --profile e2-demo-west jobs submit --json '{
+  "run_name": "agent-redeploy",
+  "tasks": [{"task_key": "log_and_deploy", "notebook_task": {
+    "notebook_path": "/Workspace/Users/aradhya.chouhan@databricks.com/servicenow-gtm-agent/log_and_deploy",
+    "source": "WORKSPACE"}, "environment_key": "default"}],
+  "environments": [{"environment_key": "default", "spec": {"client": "2",
+    "dependencies": ["mlflow>=3.6.0","databricks-langchain","langgraph>=0.3","databricks-agents","pydantic"]}}]
+}'
+
+# 4. Upload and redeploy Streamlit app
+databricks --profile e2-demo-west workspace import \
+  /Workspace/Users/aradhya.chouhan@databricks.com/servicenow-gtm-agent/app/app.py \
+  --file app/app.py --format AUTO --overwrite
+
+databricks --profile e2-demo-west apps deploy gtm-deal-intelligence \
+  --source-code-path /Workspace/Users/aradhya.chouhan@databricks.com/servicenow-gtm-agent/app
 ```
 
 Endpoint name: `agents_users-aradhya_chouhan-gtm_deal_intelligence_agent`
+App URL: `https://gtm-deal-intelligence-2556758628403379.aws.databricksapps.com`
 
 ## Workspace Assets (e2-demo-west)
 
@@ -143,7 +207,10 @@ Endpoint name: `agents_users-aradhya_chouhan-gtm_deal_intelligence_agent`
 | UC Functions | `users.aradhya_chouhan.calculate_deal_health`, `get_account_signals` |
 | MLflow Experiment | `/Users/aradhya.chouhan@databricks.com/gtm-deal-intelligence` |
 | Model | `users.aradhya_chouhan.gtm_deal_intelligence_agent` |
-| Serving Endpoint | `agents_users-aradhya_chouhan-gtm_deal_intelligence_agent` |
+| Serving Endpoint | `agents_users-aradhya_chouhan-gtm_deal_intelligence_agent` (v2 = memory-enabled) |
+| SQL Warehouse | `75fd8278393d07eb` ("Shared Endpoint") — used by agent for memory queries |
+| Memory Tables (Delta) | `users.aradhya_chouhan.memory_ae_profiles`, `memory_account_context`, `memory_deal_decisions` |
+| Streamlit App | `gtm-deal-intelligence` — `https://gtm-deal-intelligence-2556758628403379.aws.databricksapps.com` |
 
 ## Design References
 

@@ -1,10 +1,16 @@
 """
 GTM Deal Intelligence Agent — Streamlit App
 Powered by Databricks
+
+Memory support:
+  Short-term: thread_id tracked per session for multi-turn conversations
+  Long-term:  ae_id passed to agent for cross-session preference recall
 """
 
 import json
 import os
+import uuid
+
 import streamlit as st
 
 st.set_page_config(page_title="GTM Deal Intelligence Agent", layout="wide")
@@ -21,9 +27,15 @@ st.markdown("""
     .badge-mlflow       { background: rgba(23,200,160,0.15); color: #17c8a0; border: 1px solid rgba(23,200,160,0.3); }
     .badge-langgraph    { background: rgba(94,189,58,0.15);  color: #5ebd3a; border: 1px solid rgba(94,189,58,0.3); }
     .badge-gateway      { background: rgba(255,54,33,0.12);  color: #FF3621; border: 1px solid rgba(255,54,33,0.25); }
+    .badge-lakebase     { background: rgba(255,179,0,0.15);  color: #e6a800; border: 1px solid rgba(255,179,0,0.3); }
     .tech-callout {
         background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
         border-radius: 8px; padding: 10px 14px; margin: 8px 0; font-size: 13px;
+    }
+    .memory-indicator {
+        background: rgba(255,179,0,0.08); border: 1px solid rgba(255,179,0,0.2);
+        border-radius: 6px; padding: 6px 10px; margin: 4px 0; font-size: 12px;
+        color: #e6a800;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -33,6 +45,13 @@ st.markdown("""
 ENDPOINT_NAME = os.environ.get(
     "GTM_ENDPOINT", "agents_users-aradhya_chouhan-gtm_deal_intelligence_agent"
 )
+
+# Demo AE profiles (for long-term memory demo)
+AE_PROFILES = {
+    "Jamie Torres": "ae-jamie@company.com",
+    "Sarah Kim": "ae-sarah@company.com",
+    "(None)": "",
+}
 
 DEMO_PROMPTS = {
     "Meridian Health — Deal Health + Email": (
@@ -59,17 +78,41 @@ DEMO_PROMPTS = {
 
 # ── Agent query function ─────────────────────────────────────────────────
 
-def query_agent(question: str) -> dict:
-    """Query the deployed agent using the Responses API format."""
+
+def query_agent(conversation: list[dict], thread_id: str, ae_id: str = "", account_id: str = "", save_memories: bool = False) -> dict:
+    """Query the deployed agent with full conversation history + memory context.
+
+    Sends the entire conversation (not just the last message) so the agent
+    has full context for multi-turn follow-ups like "make it shorter".
+    """
     from databricks.sdk import WorkspaceClient
     from databricks.sdk.config import Config
     # Use a 5-minute timeout — complex queries with multiple tool calls can take 2-3 min
     cfg = Config(http_timeout_seconds=300)
     w = WorkspaceClient(config=cfg)
+
+    # Build input from full conversation (user + assistant messages)
+    input_messages = [
+        {"role": msg["role"], "content": msg["content"]}
+        for msg in conversation
+        if msg["role"] in ("user", "assistant") and msg.get("content")
+    ]
+
+    body = {
+        "input": input_messages,
+        "custom_inputs": {
+            "thread_id": thread_id,
+            "ae_id": ae_id,
+            "save_memories": save_memories,
+        },
+    }
+    if account_id:
+        body["custom_inputs"]["account_id"] = account_id
+
     return w.api_client.do(
         "POST",
         f"/serving-endpoints/{ENDPOINT_NAME}/invocations",
-        body={"input": [{"role": "user", "content": question}]},
+        body=body,
     )
 
 
@@ -95,12 +138,38 @@ def extract_tool_calls(response: dict) -> list:
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "thread_id" not in st.session_state:
+    st.session_state.thread_id = str(uuid.uuid4())
+if "turn_count" not in st.session_state:
+    st.session_state.turn_count = 0
 
 # ── Sidebar ──────────────────────────────────────────────────────────────
 
 with st.sidebar:
     st.markdown("### GTM Deal Intelligence")
     st.caption("Powered by Databricks")
+    st.divider()
+
+    # AE selector (for long-term memory)
+    st.markdown("**AE Identity** (for memory)")
+    ae_name = st.selectbox(
+        "Select AE",
+        options=list(AE_PROFILES.keys()),
+        index=0,
+        label_visibility="collapsed",
+    )
+    ae_id = AE_PROFILES[ae_name]
+
+    if ae_id:
+        st.markdown(
+            f'<div class="memory-indicator">Long-term memory active for <b>{ae_name}</b></div>',
+            unsafe_allow_html=True,
+        )
+
+    # Thread info
+    short_thread = st.session_state.thread_id[:8]
+    st.caption(f"Session: `{short_thread}...` ({st.session_state.turn_count} turns)")
+
     st.divider()
 
     st.markdown("**Quick Scenarios**")
@@ -110,9 +179,34 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    if st.button("Clear Chat", use_container_width=True):
-        st.session_state.messages = []
-        st.rerun()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("New Session", use_container_width=True):
+            # Save memories from current session before clearing
+            if st.session_state.messages and ae_id:
+                try:
+                    save_msgs = st.session_state.messages + [
+                        {"role": "user", "content": "Summarize what we discussed."}
+                    ]
+                    query_agent(
+                        save_msgs,
+                        thread_id=st.session_state.thread_id,
+                        ae_id=ae_id,
+                        save_memories=True,
+                    )
+                except Exception:
+                    pass  # Best-effort memory save
+            st.session_state.messages = []
+            st.session_state.thread_id = str(uuid.uuid4())
+            st.session_state.turn_count = 0
+            st.rerun()
+    with col2:
+        if st.button("Clear Chat", use_container_width=True):
+            st.session_state.messages = []
+            st.session_state.thread_id = str(uuid.uuid4())
+            st.session_state.turn_count = 0
+            st.rerun()
 
 # ── Main ─────────────────────────────────────────────────────────────────
 
@@ -127,14 +221,18 @@ for msg in st.session_state.messages:
 
 # If last message is user and needs a response
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-    user_msg = st.session_state.messages[-1]["content"]
     with st.chat_message("assistant"):
         with st.spinner("Querying agent (UC Functions + Vector Search + Claude Sonnet 4.6)..."):
             try:
-                raw = query_agent(user_msg)
+                raw = query_agent(
+                    st.session_state.messages,
+                    thread_id=st.session_state.thread_id,
+                    ae_id=ae_id,
+                )
                 text = extract_text(raw)
                 tool_calls = extract_tool_calls(raw)
 
+                st.session_state.turn_count += 1
                 st.markdown(text)
 
                 # Build tech badges
@@ -146,6 +244,9 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
                     if "transcripts" in tc or "battlecards" in tc or "stories" in tc:
                         badges.append('<span class="tech-badge badge-vectorsearch">Vector Search</span>')
                 badges.append('<span class="tech-badge badge-mlflow">MLflow Tracing</span>')
+                # Add Lakebase badge when memory features are active
+                if ae_id or st.session_state.turn_count > 1:
+                    badges.append('<span class="tech-badge badge-lakebase">Lakebase Memory</span>')
 
                 # Deduplicate
                 seen = set()

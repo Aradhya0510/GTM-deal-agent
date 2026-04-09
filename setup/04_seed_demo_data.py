@@ -183,6 +183,134 @@ deal_stories_df = spark.createDataFrame(
 )
 deal_stories_df.write.mode("overwrite").saveAsTable("gtm.enablement.deal_stories")
 
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  LONG-TERM MEMORY — Lakebase Postgres tables                            ║
+# ║  Seed data so the agent "remembers" preferences from day one.            ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
+# Memory tables live in Lakebase (Postgres), not Delta. Use the Databricks SDK
+# WorkspaceClient to connect and insert directly.
+
+try:
+    from databricks.sdk import WorkspaceClient
+
+    w = WorkspaceClient()
+    conn = w.lakebase.connect(instance_name="gtm-memory")
+
+    # --- AE Preference Profiles ---
+    # Jamie Torres: experienced AE, prefers concise emails, direct tone
+    conn.execute(
+        """
+        INSERT INTO gtm.memory_ae_profiles
+            (ae_id, email_style, outreach_prefs, avoid_competitors, formatting_prefs, raw_preferences, updated_at)
+        VALUES (%s, %s::JSONB, %s::JSONB, %s::VARCHAR[], %s::JSONB, %s::TEXT[], NOW())
+        ON CONFLICT (ae_id) DO UPDATE SET
+            email_style = EXCLUDED.email_style,
+            outreach_prefs = EXCLUDED.outreach_prefs,
+            avoid_competitors = EXCLUDED.avoid_competitors,
+            formatting_prefs = EXCLUDED.formatting_prefs,
+            raw_preferences = EXCLUDED.raw_preferences,
+            updated_at = NOW()
+        """,
+        [
+            "ae-jamie@company.com",
+            '{"max_words": 120, "tone": "direct and professional", "greeting": "Hi {first_name},"}',
+            '{"preferred_cta": "15-minute call this week", "sign_off": "Best, Jamie", "include_proof_points": true}',
+            '{ServiceNow}',
+            '{"bullet_points": true, "bold_key_metrics": true}',
+            '{email_max_words:120,email_tone:direct and professional,avoid_competitor_mention:ServiceNow,preferred_cta:15-minute call this week,formatting:use bullet points for key metrics}',
+        ],
+    )
+
+    # Sarah Kim: newer AE, likes detailed analysis, warmer tone
+    conn.execute(
+        """
+        INSERT INTO gtm.memory_ae_profiles
+            (ae_id, email_style, outreach_prefs, avoid_competitors, formatting_prefs, raw_preferences, updated_at)
+        VALUES (%s, %s::JSONB, %s::JSONB, %s::VARCHAR[], %s::JSONB, %s::TEXT[], NOW())
+        ON CONFLICT (ae_id) DO UPDATE SET
+            email_style = EXCLUDED.email_style,
+            outreach_prefs = EXCLUDED.outreach_prefs,
+            avoid_competitors = EXCLUDED.avoid_competitors,
+            formatting_prefs = EXCLUDED.formatting_prefs,
+            raw_preferences = EXCLUDED.raw_preferences,
+            updated_at = NOW()
+        """,
+        [
+            "ae-sarah@company.com",
+            '{"max_words": 200, "tone": "warm and consultative", "greeting": "Hey {first_name},"}',
+            '{"preferred_cta": "discovery workshop", "sign_off": "Cheers, Sarah", "include_proof_points": true}',
+            '{}',
+            '{"bullet_points": false, "bold_key_metrics": false}',
+            '{email_max_words:200,email_tone:warm and consultative,preferred_cta:discovery workshop}',
+        ],
+    )
+
+    print("  AE profiles:  2 (Jamie Torres, Sarah Kim)")
+
+    # --- Account Context (cross-session facts) ---
+    memory_account_context = [
+        # Meridian Health — Jamie's account
+        ("ACC-1001", "champion_change", "Sarah Chen was promoted to VP of IT Operations in March 2026 — she now has direct budget authority up to $2M", "ae-jamie@company.com", 0.95),
+        ("ACC-1001", "competitor_mentioned", "BMC Helix had a demo with Meridian in March 2026 but feedback was negative — UI described as 'clunky'", "ae-jamie@company.com", 0.92),
+        ("ACC-1001", "budget_freeze", "Board mandate to reduce IT ops spend by 15% this fiscal year — champion sees platform consolidation as the path", "ae-jamie@company.com", 0.88),
+        # Apex Financial — Jamie's account
+        ("ACC-1002", "technical_requirement", "CISO Jennifer Walsh requires SOC team MTTR under 15 minutes — current average is 45 minutes", "ae-jamie@company.com", 0.90),
+        ("ACC-1002", "competitor_mentioned", "Palo Alto XSOAR offering aggressive discounting on the Apex deal", "ae-jamie@company.com", 0.85),
+        ("ACC-1002", "sentiment_shift", "Champion Michael Torres is pushing hard for AI-powered triage — his 'pet project' with executive visibility", "ae-jamie@company.com", 0.87),
+        # Atlas Cloud — Jamie's account (stalled)
+        ("ACC-1006", "champion_change", "James Liu (Head of Platform) went quiet in Feb 2026 — last known: building internal ROI business case, no budget approval from CEO", "ae-jamie@company.com", 0.82),
+        # NovaTech — Sarah's account
+        ("ACC-1003", "timeline_shift", "CTO Amy Rodriguez wants to be live by August 2026 — fast timeline, no formal RFP yet", "ae-sarah@company.com", 0.91),
+    ]
+
+    for acct_id, ctx_type, content, ae_id, confidence in memory_account_context:
+        conn.execute(
+            """
+            INSERT INTO gtm.memory_account_context
+                (account_id, context_type, content, source_thread_id, ae_id, confidence, extracted_at)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT DO NOTHING
+            """,
+            [acct_id, ctx_type, content, "seed-data", ae_id, confidence],
+        )
+
+    print(f"  Account ctx:  {len(memory_account_context)} facts")
+
+    # --- Deal Decisions (agent recommendations vs AE actions) ---
+    memory_deal_decisions = [
+        # Jamie accepted: focus on TCO for Meridian CIO
+        ("OPP-3001", "ae-jamie@company.com", "Focus the executive briefing on 3-year TCO comparison vs current HP Service Manager + BMC stack", "accepted", "Good call — Kim is all about the numbers"),
+        # Jamie modified: softer email tone for Apex CISO
+        ("OPP-3002", "ae-jamie@company.com", "Lead with AI triage metrics in the email to CISO", "modified", "Good data but Jennifer is skeptical of AI claims — lead with the real incident detection story instead"),
+        # Jamie rejected: premature discount for Atlas
+        ("OPP-3006", "ae-jamie@company.com", "Offer a 20% discount to re-engage James Liu at Atlas Cloud", "rejected", "Too early for discounts — James needs help building the internal business case first, not a lower price"),
+    ]
+
+    for opp_id, ae_id, recommendation, ae_action, feedback in memory_deal_decisions:
+        conn.execute(
+            """
+            INSERT INTO gtm.memory_deal_decisions
+                (opp_id, ae_id, session_thread_id, recommendation, ae_action, ae_feedback)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            [opp_id, ae_id, "seed-data", recommendation, ae_action, feedback],
+        )
+
+    print(f"  Decisions:    {len(memory_deal_decisions)} logged")
+
+    print("\nLong-term memory tables seeded.")
+
+except ImportError:
+    print("\n  [SKIP] databricks.sdk not available — skipping Lakebase memory seed.")
+    print("  Memory tables must be seeded separately after Lakebase is provisioned.")
+except Exception as e:
+    print(f"\n  [SKIP] Lakebase memory seed failed: {e}")
+    print("  Ensure Lakebase instance 'gtm-memory' is provisioned and tables exist.")
+    print("  Run 01_lakebase_schema.sql first, then re-run this script.")
+
+
+print("\n" + "=" * 60)
 print("Demo data seeded successfully.")
 print(f"  Accounts:     {accounts_df.count()}")
 print(f"  Contacts:     {contacts_df.count()}")
