@@ -1,0 +1,28 @@
+# GTM Deal Intelligence Agent — Default Configuration
+# Modify these values to match your Databricks workspace setup.
+
+model:
+  research_model: databricks-claude-3-5-sonnet       # Model Serving endpoint for research agent
+  scoring_model: databricks-claude-3-5-sonnet         # Model Serving endpoint for scoring agent
+  outreach_model: databricks-claude-3-5-sonnet        # Model Serving endpoint for outreach agent
+  memory_extraction_model: databricks-claude-3-5-haiku # Fast/cheap model for session-close extraction
+
+data:
+  catalog: gtm
+  crm_schema: crm
+  vector_search_endpoint: gtm_vs_endpoint
+  call_transcripts_index: gtm.vectors.call_transcripts
+  battlecards_index: gtm.vectors.battlecards
+  deal_stories_index: gtm.vectors.deal_stories
+
+lakebase:
+  instance_name: gtm-memory
+  memory_schema: gtm.memory
+
+mlflow:
+  experiment_name: /gtm/deal-intelligence-agent
+  autolog: true
+
+serving:
+  endpoint_name: gtm-deal-intelligence
+  scale_to_zero: true

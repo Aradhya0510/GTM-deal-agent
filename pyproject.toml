@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "servicenow-gtm-agent"
+version = "0.1.0"
+description = "GTM Deal Intelligence Agent — multi-agent system for deal scoring, account research, and personalized outreach, powered by Databricks"
+requires-python = ">=3.11"
+dependencies = [
+    "databricks-langchain",
+    "langgraph>=0.3",
+    "mlflow>=3.6.0",
+    "databricks-sdk>=0.30",
+    "databricks-agents",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.5",
+]
+app = [
+    "streamlit>=1.38",
+    "openai>=1.50",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

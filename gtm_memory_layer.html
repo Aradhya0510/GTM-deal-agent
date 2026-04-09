@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stateful Memory Layer — GTM Deal Intelligence Agent</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+:root {
+  --bg: #0d1117; --bg2: #161b27; --bg3: #1e2535; --surface: #242d3e;
+  --border: rgba(255,255,255,0.07); --border2: rgba(255,255,255,0.13);
+  --text: #e2e8f4; --muted: #8b96ad; --faint: #4a5470;
+  --red: #FF3621; --purple: #7c6df0; --teal: #17c8a0;
+  --blue: #4b9cf5; --amber: #f0a530; --coral: #e85d2e; --green: #5ebd3a;
+  --pink: #d95bab;
+  --font: 'Segoe UI', system-ui, sans-serif;
+  --mono: 'Cascadia Code','Fira Code','Consolas', monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.6; }
+
+.layout { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; max-width: 1180px; margin: 0 auto; }
+.sidebar { position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: 28px 18px; border-right: 1px solid var(--border); }
+.main { padding: 44px 52px; max-width: 860px; }
+
+.sidebar-logo { font-size: 11px; font-weight: 700; color: var(--red); letter-spacing: .1em; text-transform: uppercase; margin-bottom: 4px; }
+.sidebar-parent { font-size: 11px; color: var(--faint); margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.nav-section { font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin: 18px 0 8px; }
+.nav-item { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 12px; color: var(--muted); text-decoration: none; transition: color .15s; }
+.nav-item:hover { color: var(--text); }
+.nav-item .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+h1 { font-size: 26px; font-weight: 800; color: var(--text); line-height: 1.25; margin-bottom: 10px; }
+h2 { font-size: 17px; font-weight: 700; color: var(--text); margin: 44px 0 14px; display: flex; align-items: center; gap: 10px; }
+h3 { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; margin: 22px 0 10px; }
+p { color: var(--muted); margin-bottom: 14px; line-height: 1.7; }
+code { font-family: var(--mono); font-size: 12px; background: var(--bg3); padding: 2px 6px; border-radius: 4px; color: var(--teal); }
+
+.hero-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(124,109,240,.15); border: 1px solid rgba(124,109,240,.3); color: var(--purple); font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 4px; margin-bottom: 18px; letter-spacing: .04em; text-transform: uppercase; }
+.hero-sub { font-size: 14px; color: var(--muted); line-height: 1.7; max-width: 640px; margin-bottom: 28px; }
+.divider { border: none; border-top: 1px solid var(--border); margin: 36px 0; }
+
+/* MEMORY TIER CARDS */
+.tier-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0 24px; }
+.tier-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+.tier-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.tier-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+.tier-title { font-size: 14px; font-weight: 700; color: var(--text); }
+.tier-sub { font-size: 11px; color: var(--faint); margin-top: 1px; }
+.tier-list { list-style: none; }
+.tier-list li { font-size: 12px; color: var(--muted); padding: 4px 0; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 7px; }
+.tier-list li:last-child { border-bottom: none; }
+.tier-list li::before { content: '→'; color: var(--faint); flex-shrink: 0; margin-top: 1px; }
+
+/* FLOW DIAGRAM */
+.mem-flow { display: flex; flex-direction: column; gap: 0; margin: 16px 0 24px; }
+.flow-row { display: flex; align-items: stretch; gap: 0; }
+.flow-box { flex: 1; background: var(--bg2); border: 1px solid var(--border); padding: 12px 14px; }
+.flow-box:first-child { border-radius: 8px 0 0 8px; }
+.flow-box:last-child { border-radius: 0 8px 8px 0; }
+.flow-sep { display: flex; align-items: center; padding: 0 6px; color: var(--faint); font-size: 13px; }
+.flow-tag { font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 4px; }
+.flow-label { font-size: 12px; font-weight: 600; color: var(--text); }
+.flow-detail { font-size: 11px; color: var(--faint); margin-top: 1px; }
+.flow-conn { display: flex; align-items: center; justify-content: center; height: 24px; color: var(--faint); font-size: 13px; }
+
+/* CODE */
+.code-wrap { margin: 12px 0 18px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+.code-header { background: var(--bg3); padding: 7px 14px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+.code-lang { font-size: 10px; font-weight: 700; color: var(--faint); letter-spacing: .07em; text-transform: uppercase; }
+.code-file { font-size: 11px; color: var(--faint); font-family: var(--mono); }
+pre { margin: 0 !important; border-radius: 0 !important; background: #0d1117 !important; }
+pre code { font-size: 12px !important; line-height: 1.55 !important; font-family: var(--mono) !important; padding: 16px !important; background: none !important; color: inherit !important; }
+
+.callout { border-radius: 8px; padding: 13px 15px; margin: 14px 0; border-left: 3px solid; }
+.callout-info { background: rgba(75,156,245,.08); border-color: var(--blue); }
+.callout-warn { background: rgba(240,165,48,.08); border-color: var(--amber); }
+.callout-tip  { background: rgba(23,200,160,.08); border-color: var(--teal); }
+.callout-purple { background: rgba(124,109,240,.08); border-color: var(--purple); }
+.callout-tag { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 4px; }
+.callout-info .callout-tag { color: var(--blue); }
+.callout-warn .callout-tag { color: var(--amber); }
+.callout-tip  .callout-tag { color: var(--teal); }
+.callout-purple .callout-tag { color: var(--purple); }
+.callout p { margin: 0; font-size: 13px; }
+
+.output-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--teal); background: rgba(23,200,160,.1); border: 1px solid rgba(23,200,160,.2); padding: 4px 10px; border-radius: 4px; margin-top: 8px; }
+.phase-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 26px; margin-bottom: 32px; }
+.phase-hdr { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 16px; }
+.phase-icon { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 17px; flex-shrink: 0; }
+.sec-num { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; border: 1.5px solid; flex-shrink: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 14px; }
+.chip { font-size: 11px; padding: 3px 9px; border-radius: 4px; border: 1px solid var(--border2); color: var(--muted); font-weight: 500; }
+
+/* MEMORY LIFECYCLE VISUAL */
+.lifecycle { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; margin: 16px 0 24px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.lc-step { padding: 14px 12px; border-right: 1px solid var(--border); text-align: center; }
+.lc-step:last-child { border-right: none; }
+.lc-num { font-size: 18px; font-weight: 800; margin-bottom: 5px; }
+.lc-label { font-size: 11px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+.lc-detail { font-size: 10px; color: var(--faint); line-height: 1.4; }
+
+/* COMPARISON TABLE */
+.cmp-table { width: 100%; border-collapse: collapse; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); margin: 14px 0 20px; }
+.cmp-table th { background: var(--bg3); font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); padding: 10px 14px; text-align: left; }
+.cmp-table td { padding: 11px 14px; border-top: 1px solid var(--border); font-size: 13px; vertical-align: top; color: var(--muted); }
+.cmp-table td:first-child { color: var(--text); font-weight: 500; }
+.cmp-table tr:hover td { background: rgba(255,255,255,.015); }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sidebar-logo">Databricks</div>
+  <div class="sidebar-parent">GTM Agent · Memory Layer Addendum</div>
+
+  <div class="nav-section">Context</div>
+  <a class="nav-item" href="#gap"><span class="dot" style="background:var(--coral)"></span>The memory gap</a>
+  <a class="nav-item" href="#architecture"><span class="dot" style="background:var(--purple)"></span>Memory architecture</a>
+  <a class="nav-item" href="#lifecycle"><span class="dot" style="background:var(--blue)"></span>Session lifecycle</a>
+
+  <div class="nav-section">Implementation</div>
+  <a class="nav-item" href="#schema"><span class="dot" style="background:var(--amber)"></span>Lakebase memory schema</a>
+  <a class="nav-item" href="#short-term"><span class="dot" style="background:var(--teal)"></span>Short-term memory</a>
+  <a class="nav-item" href="#long-term"><span class="dot" style="background:var(--purple)"></span>Long-term memory</a>
+  <a class="nav-item" href="#graph-update"><span class="dot" style="background:var(--blue)"></span>Updated LangGraph</a>
+  <a class="nav-item" href="#time-travel"><span class="dot" style="background:var(--pink)"></span>Time travel</a>
+  <a class="nav-item" href="#app-layer"><span class="dot" style="background:var(--green)"></span>App layer wiring</a>
+  <a class="nav-item" href="#uc-governance"><span class="dot" style="background:var(--coral)"></span>Governance</a>
+  <a class="nav-item" href="#gtm-examples"><span class="dot" style="background:var(--amber)"></span>GTM examples</a>
+</aside>
+
+<!-- MAIN -->
+<main class="main">
+
+  <!-- HERO -->
+  <div class="hero-badge">Addendum · Stateful Agents</div>
+  <h1>Memory layer for the<br>GTM Deal Intelligence Agent</h1>
+  <p class="hero-sub">The current implementation starts fresh on every invocation. This addendum adds two-tier stateful memory backed by Lakebase: short-term session checkpointing so AEs can have natural multi-turn conversations, and long-term cross-session memory so the agent gets smarter with every interaction.</p>
+
+  <!-- THE GAP -->
+  <section id="gap">
+    <h2>The memory gap</h2>
+    <p>Without memory, every agent invocation is isolated. Here's what that costs the GTM team in practice:</p>
+
+    <table class="cmp-table">
+      <thead><tr><th>Scenario</th><th>Without memory</th><th>With memory</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>AE asks "make it shorter"</td>
+          <td>Agent has no idea what to shorten — fails or hallucinates a new draft</td>
+          <td>Short-term checkpoint recalls the prior outreach draft in the same session</td>
+        </tr>
+        <tr>
+          <td>AE mentions "Acme's champion changed"</td>
+          <td>Gone next session — rep must repeat context every time</td>
+          <td>Long-term memory extracts and stores the insight; surfaced on next Acme query</td>
+        </tr>
+        <tr>
+          <td>"I always want emails under 150 words"</td>
+          <td>Preference lost between sessions; agent ignores stated style</td>
+          <td>AE profile stores preferences; injected into every new session prompt</td>
+        </tr>
+        <tr>
+          <td>Mid-conversation deal pivot</td>
+          <td>Cannot backtrack; must restart the entire conversation</td>
+          <td>LangGraph time travel branches from any prior checkpoint without losing history</td>
+        </tr>
+        <tr>
+          <td>RevOps analyzing agent decisions</td>
+          <td>No audit trail of what context was available at decision time</td>
+          <td>Full checkpoint history in Lakebase; queryable via SQL for audit/debugging</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ARCHITECTURE -->
+  <section id="architecture">
+    <h2>Memory architecture</h2>
+    <p>Two tiers, both backed by Lakebase. Short-term uses LangGraph's native <code>CheckpointSaver</code> wired to a Lakebase Postgres instance. Long-term uses a memory extraction agent that runs at session end and writes structured facts to UC-governed tables.</p>
+
+    <div class="tier-grid">
+      <div class="tier-card">
+        <div class="tier-header">
+          <div class="tier-icon" style="background:rgba(23,200,160,.15)">⚡</div>
+          <div>
+            <div class="tier-title">Short-term memory</div>
+            <div class="tier-sub">Scoped to one conversation session</div>
+          </div>
+        </div>
+        <ul class="tier-list">
+          <li>Persists every LangGraph node state to Lakebase via <code>CheckpointSaver</code></li>
+          <li>Keyed by <code>thread_id</code> — one thread per conversation</li>
+          <li>AE can ask follow-up questions with full prior context</li>
+          <li>Time travel: branch from any prior checkpoint without losing original</li>
+          <li>Playground &amp; Review App auto-pass <code>thread_id</code> via <code>ChatContext</code></li>
+          <li>Survives agent restarts — state is durable in Postgres, not in-process</li>
+        </ul>
+      </div>
+      <div class="tier-card">
+        <div class="tier-header">
+          <div class="tier-icon" style="background:rgba(124,109,240,.15)">🧠</div>
+          <div>
+            <div class="tier-title">Long-term memory</div>
+            <div class="tier-sub">Persists across all sessions, per AE</div>
+          </div>
+        </div>
+        <ul class="tier-list">
+          <li>Memory extraction agent runs at session close, distills key facts</li>
+          <li>Three stores: AE preferences, account context, deal decisions</li>
+          <li>Retrieved at session start and injected into the system prompt</li>
+          <li>UC row-level security: AEs only see their own memories</li>
+          <li>Shared account context visible to all AEs on the same account</li>
+          <li>Memory ages out — recent facts weighted higher in retrieval</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- LIFECYCLE -->
+  <section id="lifecycle">
+    <h2>Session lifecycle with memory</h2>
+
+    <div class="lifecycle">
+      <div class="lc-step" style="background:rgba(124,109,240,.07)">
+        <div class="lc-num" style="color:var(--purple)">1</div>
+        <div class="lc-label">Session start</div>
+        <div class="lc-detail">Generate thread_id. Load AE long-term profile + account context from Lakebase.</div>
+      </div>
+      <div class="lc-step" style="background:rgba(23,200,160,.07)">
+        <div class="lc-num" style="color:var(--teal)">2</div>
+        <div class="lc-label">Prompt inject</div>
+        <div class="lc-detail">Prepend long-term memories to system prompt. AE preferences + recent account notes always in context.</div>
+      </div>
+      <div class="lc-step" style="background:rgba(75,156,245,.07)">
+        <div class="lc-num" style="color:var(--blue)">3</div>
+        <div class="lc-label">Conversation</div>
+        <div class="lc-detail">Each LangGraph step checkpointed to Lakebase. Multi-turn works natively via thread_id.</div>
+      </div>
+      <div class="lc-step" style="background:rgba(240,165,48,.07)">
+        <div class="lc-num" style="color:var(--amber)">4</div>
+        <div class="lc-label">Session close</div>
+        <div class="lc-detail">Memory extraction agent distills: preferences, deal insights, account context. Upserts to long-term store.</div>
+      </div>
+      <div class="lc-step" style="background:rgba(94,189,58,.07)">
+        <div class="lc-num" style="color:var(--green)">5</div>
+        <div class="lc-label">Next session</div>
+        <div class="lc-label" style="font-size:10px;margin-top:2px">Improved</div>
+        <div class="lc-detail">Long-term store has grown. Agent knows the AE, knows the account. Smarter from day one.</div>
+      </div>
+    </div>
+
+    <div class="callout callout-info">
+      <div class="callout-tag">Databricks docs</div>
+      <p>When using the AI Playground or Review App, <code>conversation_id</code> and <code>user_id</code> are automatically passed as <code>ChatContext</code> — no manual <code>thread_id</code> wiring needed for those surfaces. For the Databricks Apps AE interface, pass <code>thread_id</code> explicitly via <code>custom_inputs</code>.</p>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- LAKEBASE SCHEMA -->
+  <section id="schema">
+    <div class="phase-card">
+      <div class="phase-hdr">
+        <div class="phase-icon" style="background:rgba(240,165,48,.15)">🗄️</div>
+        <div>
+          <h2 style="margin:0 0 4px"><span class="sec-num" style="border-color:var(--amber);color:var(--amber)">1</span> Lakebase memory schema</h2>
+          <p style="margin:0;font-size:13px">Three tables for long-term memory sit alongside the LangGraph checkpoint tables that Databricks manages automatically.</p>
+        </div>
+      </div>
+
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">SQL</span><span class="code-file">memory/00_schema.sql</span></div>
+        <pre><code class="language-sql">-- Lakebase (Postgres) — same instance as the CRM operational store
+-- LangGraph checkpoint tables are created automatically by CheckpointSaver.
+-- We add three tables for long-term memory.
+
+-- ── 1. AE preference profile ──────────────────────────────────────────
+-- Stores persistent preferences extracted from conversations.
+CREATE TABLE IF NOT EXISTS gtm.memory.ae_profiles (
+  ae_id              VARCHAR PRIMARY KEY,
+  email_style        JSONB,     -- {"max_words": 150, "tone": "direct", "avoid": ["jargon"]}
+  outreach_prefs     JSONB,     -- {"preferred_cta": "15-min call", "follow_up_cadence": "3d"}
+  avoid_competitors  VARCHAR[], -- Competitors the AE prefers not to mention
+  formatting_prefs   JSONB,     -- {"bullet_points": false, "sign_off": "Best, Jamie"}
+  raw_preferences    TEXT[],    -- Verbatim extracted preference statements
+  updated_at         TIMESTAMP DEFAULT NOW()
+);
+
+-- ── 2. Account-level cross-session context ────────────────────────────
+-- Shared across all AEs on the same account (with UC policy).
+-- Captures deal nuances the agent has learned over multiple sessions.
+CREATE TABLE IF NOT EXISTS gtm.memory.account_context (
+  account_id         VARCHAR,
+  context_type       VARCHAR,   -- 'champion_change' | 'budget_freeze' | 'competitor_mentioned'
+  content            TEXT,      -- Human-readable fact, e.g. "Champion changed from Sarah to Mike (VP Eng) in Feb 2026"
+  source_thread_id   VARCHAR,   -- Which conversation this came from
+  ae_id              VARCHAR,   -- Who surfaced it
+  confidence         FLOAT,     -- Extraction confidence 0-1
+  extracted_at       TIMESTAMP DEFAULT NOW(),
+  expires_at         TIMESTAMP, -- Optional TTL for stale facts
+  PRIMARY KEY (account_id, context_type, extracted_at)
+);
+
+-- ── 3. Deal decision log ──────────────────────────────────────────────
+-- Tracks what recommendations were made and whether AEs acted on them.
+-- Feeds back into the Quotient AI RL loop.
+CREATE TABLE IF NOT EXISTS gtm.memory.deal_decisions (
+  decision_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  opp_id             VARCHAR,
+  ae_id              VARCHAR,
+  session_thread_id  VARCHAR,
+  recommendation     TEXT,      -- What the agent recommended
+  ae_action          VARCHAR,   -- 'accepted' | 'modified' | 'rejected'
+  ae_feedback        TEXT,      -- Optional AE note on why they modified/rejected
+  outcome            VARCHAR,   -- Populated later: 'deal_won' | 'deal_lost' | 'stalled'
+  decided_at         TIMESTAMP DEFAULT NOW()
+);
+
+-- Index for fast AE-level retrieval
+CREATE INDEX ON gtm.memory.account_context (account_id, extracted_at DESC);
+CREATE INDEX ON gtm.memory.ae_profiles (ae_id);
+CREATE INDEX ON gtm.memory.deal_decisions (opp_id, decided_at DESC);</code></pre>
+      </div>
+      <div class="output-tag">✓ 3 long-term memory tables + LangGraph checkpoint tables (auto-managed)</div>
+    </div>
+  </section>
+
+  <!-- SHORT-TERM MEMORY -->
+  <section id="short-term">
+    <div class="phase-card">
+      <div class="phase-hdr">
+        <div class="phase-icon" style="background:rgba(23,200,160,.15)">⚡</div>
+        <div>
+          <h2 style="margin:0 0 4px"><span class="sec-num" style="border-color:var(--teal);color:var(--teal)">2</span> Short-term memory — LangGraph checkpointing</h2>
+          <p style="margin:0;font-size:13px">Wire the Lakebase <code>CheckpointSaver</code> into the LangGraph graph. Every node execution writes a durable checkpoint — session continuity survives restarts, scales horizontally, and is fully auditable.</p>
+        </div>
+      </div>
+
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">memory/01_short_term.py</span></div>
+        <pre><code class="language-python">import uuid
+import mlflow
+from typing import Generator, Optional
+from langgraph.graph import StateGraph, END
+from databricks.agents.lakebase import CheckpointSaver
+from databricks.agents import ResponsesAgentRequest, ResponsesAgentResponse
+from databricks.agents import ResponsesAgentStreamEvent, LangGraphResponsesAgent
+
+# ── Configuration ─────────────────────────────────────────────────────
+LAKEBASE_INSTANCE = "gtm-memory"   # Your Lakebase instance name
+LAKEBASE_SCHEMA   = "gtm.memory"   # Schema where checkpoint tables live
+
+
+class GTMDealAgent(LangGraphResponsesAgent):
+    """
+    Stateful GTM Deal Intelligence Agent.
+    Short-term memory: LangGraph checkpoints persisted to Lakebase.
+    Long-term memory: Injected into system prompt at session start.
+    """
+
+    def _create_graph(self, checkpointer):
+        """Build the LangGraph graph wired to the Lakebase checkpointer."""
+        workflow = StateGraph(DealState)
+
+        workflow.add_node("load_memory",  self._load_long_term_memory)
+        workflow.add_node("research",     research_agent)
+        workflow.add_node("scoring",      scoring_agent)
+        workflow.add_node("outreach",     outreach_agent)
+        workflow.add_node("save_memory",  self._trigger_memory_extraction)
+
+        workflow.set_entry_point("load_memory")
+        workflow.add_edge("load_memory", "research")
+        workflow.add_edge("research",    "scoring")
+        workflow.add_edge("scoring",     "outreach")
+        workflow.add_edge("outreach",    "save_memory")
+        workflow.add_edge("save_memory", END)
+
+        # Wire in the Lakebase checkpoint saver
+        return workflow.compile(checkpointer=checkpointer)
+
+    # ── Prediction (non-streaming) ────────────────────────────────────
+    def predict(self, request: ResponsesAgentRequest) -> ResponsesAgentResponse:
+        custom_inputs = dict(request.custom_inputs or {})
+
+        # Generate a new thread_id if this is a fresh conversation
+        if "thread_id" not in custom_inputs:
+            custom_inputs["thread_id"] = str(uuid.uuid4())
+        request.custom_inputs = custom_inputs
+
+        outputs = [
+            event.item
+            for event in self.predict_stream(request)
+            if event.type == "response.output_item.done"
+        ]
+
+        # Surface thread_id and checkpoint_id in response for the App to store
+        custom_outputs = {"thread_id": custom_inputs["thread_id"]}
+        try:
+            history = self.get_checkpoint_history(custom_inputs["thread_id"], limit=1)
+            if history:
+                custom_outputs["checkpoint_id"] = history[0]["checkpoint_id"]
+        except Exception:
+            pass
+
+        return ResponsesAgentResponse(output=outputs, custom_outputs=custom_outputs)
+
+    # ── Streaming prediction ──────────────────────────────────────────
+    def predict_stream(
+        self, request: ResponsesAgentRequest
+    ) -> Generator[ResponsesAgentStreamEvent, None, None]:
+        custom_inputs = request.custom_inputs or {}
+        thread_id     = custom_inputs.get("thread_id", str(uuid.uuid4()))
+        checkpoint_id = custom_inputs.get("checkpoint_id")  # for time-travel branching
+
+        checkpoint_config = {"configurable": {"thread_id": thread_id}}
+        if checkpoint_id:
+            checkpoint_config["configurable"]["checkpoint_id"] = checkpoint_id
+
+        # Open a connection-pooled Lakebase CheckpointSaver
+        with CheckpointSaver(
+            instance_name=LAKEBASE_INSTANCE,
+            schema_name=LAKEBASE_SCHEMA
+        ) as checkpointer:
+            graph  = self._create_graph(checkpointer)
+            inputs = self.prep_msgs_for_cc_llm([i.model_dump() for i in request.input])
+
+            for event in graph.stream(
+                {"messages": inputs, "thread_id": thread_id, "ae_id": custom_inputs.get("ae_id")},
+                config=checkpoint_config,
+                stream_mode="values"
+            ):
+                yield from self._convert_to_stream_events(event)
+
+    # ── Checkpoint history (for time travel) ─────────────────────────
+    def get_checkpoint_history(self, thread_id: str, limit: int = 10):
+        config = {"configurable": {"thread_id": thread_id}}
+        with CheckpointSaver(instance_name=LAKEBASE_INSTANCE, schema_name=LAKEBASE_SCHEMA) as cp:
+            graph   = self._create_graph(cp)
+            history = []
+            for state in graph.get_state_history(config):
+                if len(history) >= limit:
+                    break
+                history.append({
+                    "checkpoint_id":  state.config["configurable"]["checkpoint_id"],
+                    "thread_id":      thread_id,
+                    "timestamp":      state.created_at,
+                    "next_nodes":     state.next,
+                    "message_count":  len(state.values.get("messages", [])),
+                    "last_message":   (state.values.get("messages") or [""])[-1]
+                })
+        return history
+
+
+# Register with MLflow
+AGENT = GTMDealAgent()
+mlflow.models.set_model(AGENT)</code></pre>
+      </div>
+
+      <div class="callout callout-tip">
+        <div class="callout-tag">What checkpointing gives you for free</div>
+        <p>Every node execution is durably written to Lakebase. When an AE asks "make it shorter" in the same session, the agent retrieves the prior outreach draft from the checkpoint — no re-retrieval, no re-computation. The checkpoint also stores tool call results, so repeated queries within a session don't re-hit Salesforce or Gong.</p>
+      </div>
+      <div class="output-tag">✓ Session continuity · durable state · time-travel branching · horizontal scale</div>
+    </div>
+  </section>
+
+  <!-- LONG-TERM MEMORY -->
+  <section id="long-term">
+    <div class="phase-card">
+      <div class="phase-hdr">
+        <div class="phase-icon" style="background:rgba(124,109,240,.15)">🧠</div>
+        <div>
+          <h2 style="margin:0 0 4px"><span class="sec-num" style="border-color:var(--purple);color:var(--purple)">3</span> Long-term memory — extraction &amp; retrieval</h2>
+          <p style="margin:0;font-size:13px">A lightweight extraction agent runs at session close, distilling facts into the three Lakebase memory tables. At session start, relevant facts are retrieved and injected into the system prompt.</p>
+        </div>
+      </div>
+
+      <h3>Memory extraction (session close)</h3>
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">memory/02_extraction.py</span></div>
+        <pre><code class="language-python">import json
+from databricks.sdk import WorkspaceClient
+from databricks.agents import create_agent_executor
+
+w  = WorkspaceClient()
+
+# ── Memory extraction agent ───────────────────────────────────────────
+# Runs once per session close. Reads the full conversation, extracts facts.
+EXTRACTION_PROMPT = """
+You are a memory extraction specialist for a GTM sales AI system.
+
+Given a full conversation between a sales AE and a deal intelligence agent,
+extract ONLY concrete, reusable facts. Do not extract vague or obvious statements.
+
+Return a JSON object with three keys:
+
+"ae_preferences": A list of AE-specific preferences discovered.
+  Each item: {"preference_type": str, "value": str, "confidence": 0-1}
+  Examples:
+    {"preference_type": "email_max_words", "value": "150", "confidence": 0.95}
+    {"preference_type": "avoid_competitor", "value": "Salesforce", "confidence": 0.90}
+    {"preference_type": "preferred_cta", "value": "15-minute discovery call", "confidence": 0.85}
+
+"account_context": A list of account-specific insights surfaced by the AE.
+  Each item: {"account_id": str, "context_type": str, "content": str, "confidence": 0-1}
+  Examples:
+    {"account_id": "ACC-4821", "context_type": "champion_change",
+     "content": "Champion changed from Sarah Chen (VP Sales) to Mike Torres (VP Eng) in Feb 2026",
+     "confidence": 0.95}
+    {"account_id": "ACC-4821", "context_type": "budget_freeze",
+     "content": "Q1 budget frozen; revisit in April. CFO driving the decision.",
+     "confidence": 0.90}
+
+"deal_decisions": A list of recommendations the AE accepted, modified, or rejected.
+  Each item: {"opp_id": str, "recommendation": str, "ae_action": str, "ae_feedback": str}
+
+Return ONLY valid JSON. No preamble or explanation.
+"""
+
+memory_extractor = create_agent_executor(
+    model="databricks/claude-3-5-haiku",  # Fast, cheap — runs at session close
+    system_prompt=EXTRACTION_PROMPT
+)
+
+
+def extract_and_store_memories(thread_id: str, ae_id: str, conversation_history: list):
+    """
+    Called at session close. Extracts facts and upserts to Lakebase memory tables.
+    Runs asynchronously so it doesn't block the AE's session close.
+    """
+    # Format conversation for extraction
+    conversation_text = "\n".join([
+        f"{m['role'].upper()}: {m['content']}"
+        for m in conversation_history
+        if m.get("content")
+    ])
+
+    result = memory_extractor.predict({
+        "messages": [{"role": "user", "content": f"Extract memories from:\n\n{conversation_text}"}]
+    })
+
+    try:
+        extracted = json.loads(result["messages"][-1]["content"])
+    except json.JSONDecodeError:
+        return  # Extraction failed; log and skip silently
+
+    conn = w.lakebase.connect(instance_name="gtm-memory")
+
+    # ── Upsert AE preferences ────────────────────────────────────────
+    for pref in extracted.get("ae_preferences", []):
+        if pref["confidence"] < 0.75:
+            continue  # Skip low-confidence extractions
+        conn.execute("""
+            INSERT INTO gtm.memory.ae_profiles (ae_id, raw_preferences, updated_at)
+            VALUES (%s, ARRAY[%s::TEXT], NOW())
+            ON CONFLICT (ae_id) DO UPDATE SET
+              raw_preferences = array_append(ae_profiles.raw_preferences, EXCLUDED.raw_preferences[1]),
+              updated_at = NOW()
+        """, [ae_id, f"{pref['preference_type']}:{pref['value']}"])
+
+    # ── Upsert account context ───────────────────────────────────────
+    for ctx in extracted.get("account_context", []):
+        if ctx["confidence"] < 0.80:
+            continue
+        conn.execute("""
+            INSERT INTO gtm.memory.account_context
+              (account_id, context_type, content, source_thread_id, ae_id, confidence, extracted_at)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+        """, [ctx["account_id"], ctx["context_type"], ctx["content"], thread_id, ae_id, ctx["confidence"]])
+
+    # ── Log deal decisions ───────────────────────────────────────────
+    for dec in extracted.get("deal_decisions", []):
+        conn.execute("""
+            INSERT INTO gtm.memory.deal_decisions
+              (opp_id, ae_id, session_thread_id, recommendation, ae_action, ae_feedback)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, [dec["opp_id"], ae_id, thread_id, dec["recommendation"], dec["ae_action"], dec.get("ae_feedback", "")])</code></pre>
+      </div>
+
+      <h3>Memory retrieval (session start)</h3>
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">memory/03_retrieval.py</span></div>
+        <pre><code class="language-python">from datetime import datetime, timedelta
+
+def load_long_term_memory(ae_id: str, account_id: str = None) -> dict:
+    """
+    Called at session start. Retrieves AE profile and account context.
+    Returns a structured memory object to inject into the system prompt.
+    """
+    conn = w.lakebase.connect(instance_name="gtm-memory")
+
+    # ── AE preferences ───────────────────────────────────────────────
+    ae_prefs = conn.execute("""
+        SELECT email_style, outreach_prefs, avoid_competitors,
+               formatting_prefs, raw_preferences
+        FROM gtm.memory.ae_profiles
+        WHERE ae_id = %s
+    """, [ae_id]).fetchone()
+
+    # ── Account context (last 90 days, confidence > 0.80) ────────────
+    account_context = []
+    if account_id:
+        account_context = conn.execute("""
+            SELECT context_type, content, ae_id, confidence, extracted_at
+            FROM gtm.memory.account_context
+            WHERE account_id = %s
+              AND extracted_at > NOW() - INTERVAL '90 days'
+              AND confidence > 0.80
+            ORDER BY extracted_at DESC
+            LIMIT 10
+        """, [account_id]).fetchall()
+
+    # ── Recent deal decisions on this account ────────────────────────
+    recent_decisions = []
+    if account_id:
+        recent_decisions = conn.execute("""
+            SELECT d.recommendation, d.ae_action, d.ae_feedback, d.decided_at
+            FROM gtm.memory.deal_decisions d
+            JOIN gtm.opportunities o ON d.opp_id = o.opp_id
+            WHERE o.account_id = %s
+              AND d.decided_at > NOW() - INTERVAL '30 days'
+            ORDER BY d.decided_at DESC
+            LIMIT 5
+        """, [account_id]).fetchall()
+
+    return {
+        "ae_preferences":   ae_prefs,
+        "account_context":  account_context,
+        "recent_decisions": recent_decisions
+    }
+
+
+def build_memory_system_prompt(ae_id: str, account_id: str = None) -> str:
+    """
+    Constructs the memory prefix injected at the top of every system prompt.
+    Keeps it concise — only high-signal facts that change agent behavior.
+    """
+    memory = load_long_term_memory(ae_id, account_id)
+    sections = []
+
+    # AE preferences
+    if memory["ae_preferences"]:
+        prefs = memory["ae_preferences"]
+        pref_lines = []
+        if prefs.get("email_style", {}).get("max_words"):
+            pref_lines.append(f"- Keep emails under {prefs['email_style']['max_words']} words")
+        if prefs.get("avoid_competitors"):
+            pref_lines.append(f"- Do not mention: {', '.join(prefs['avoid_competitors'])}")
+        if prefs.get("raw_preferences"):
+            for p in (prefs["raw_preferences"] or [])[-5:]:  # Last 5 stated preferences
+                pref_lines.append(f"- {p.split(':', 1)[-1]}")
+        if pref_lines:
+            sections.append("## AE PREFERENCES (from prior sessions)\n" + "\n".join(pref_lines))
+
+    # Account context
+    if memory["account_context"]:
+        ctx_lines = [
+            f"- [{row['context_type']}] {row['content']} (surfaced {row['extracted_at'].strftime('%b %Y')})"
+            for row in memory["account_context"]
+        ]
+        sections.append("## ACCOUNT CONTEXT (from prior sessions)\n" + "\n".join(ctx_lines))
+
+    # Recent decisions
+    if memory["recent_decisions"]:
+        dec_lines = [
+            f"- Recommended: \"{row['recommendation'][:80]}...\" → AE {row['ae_action']}"
+            + (f": \"{row['ae_feedback']}\"" if row['ae_feedback'] else "")
+            for row in memory["recent_decisions"]
+        ]
+        sections.append("## RECENT DECISION HISTORY\n" + "\n".join(dec_lines))
+
+    if not sections:
+        return ""  # No prior memory — clean first session
+
+    return (
+        "# MEMORY FROM PRIOR SESSIONS\n"
+        "The following was learned from previous conversations. Apply it silently.\n\n"
+        + "\n\n".join(sections)
+        + "\n\n---\n\n"
+    )</code></pre>
+      </div>
+      <div class="output-tag">✓ AE preferences · account context · decision history · confidence-filtered retrieval</div>
+    </div>
+  </section>
+
+  <!-- UPDATED LANGGRAPH -->
+  <section id="graph-update">
+    <div class="phase-card">
+      <div class="phase-hdr">
+        <div class="phase-icon" style="background:rgba(75,156,245,.15)">🔗</div>
+        <div>
+          <h2 style="margin:0 0 4px"><span class="sec-num" style="border-color:var(--blue);color:var(--blue)">4</span> Updated LangGraph with memory nodes</h2>
+          <p style="margin:0;font-size:13px">Add <code>load_memory</code> as the entry node and <code>save_memory</code> as the exit node. The rest of the graph from Phase 4 is unchanged.</p>
+        </div>
+      </div>
+
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">memory/04_graph_update.py</span></div>
+        <pre><code class="language-python">from langgraph.graph import StateGraph, END
+from typing import TypedDict, Annotated
+import operator
+
+class DealState(TypedDict):
+    messages:          Annotated[list, operator.add]
+    thread_id:         str
+    ae_id:             str
+    account_id:        str
+    opp_id:            str
+    # ── Memory fields (new) ──────────────────────────────────────────
+    memory_prefix:     str          # Long-term memory injected into system prompt
+    session_summary:   str          # Filled by save_memory node at exit
+    # ── Agent outputs (unchanged from Phase 4) ───────────────────────
+    deal_health:       dict
+    account_signals:   dict
+    outreach_draft:    str
+    risk_flags:        list
+
+
+# ── Memory nodes ─────────────────────────────────────────────────────
+
+def load_memory_node(state: DealState) -> DealState:
+    """
+    Entry node: load long-term memory and inject into agent context.
+    Runs once per session start — lightweight Lakebase read.
+    """
+    memory_prefix = build_memory_system_prompt(
+        ae_id=state["ae_id"],
+        account_id=state.get("account_id")
+    )
+    # Prepend memory to the system message in the conversation
+    if memory_prefix and state["messages"]:
+        first_msg = state["messages"][0]
+        if first_msg.get("role") == "system":
+            state["messages"][0]["content"] = memory_prefix + first_msg["content"]
+        else:
+            state["messages"].insert(0, {"role": "system", "content": memory_prefix})
+
+    return {"memory_prefix": memory_prefix, "messages": state["messages"]}
+
+
+def save_memory_node(state: DealState) -> DealState:
+    """
+    Exit node: trigger async memory extraction. Non-blocking.
+    The session response is already returned to the AE; extraction runs in background.
+    """
+    import threading
+    t = threading.Thread(
+        target=extract_and_store_memories,
+        args=(state["thread_id"], state["ae_id"], state["messages"]),
+        daemon=True
+    )
+    t.start()
+    return {}  # No state change needed — extraction is async
+
+
+# ── Updated graph ─────────────────────────────────────────────────────
+
+def build_gtm_graph(checkpointer):
+    workflow = StateGraph(DealState)
+
+    # Memory bookend nodes (new)
+    workflow.add_node("load_memory",  load_memory_node)
+    workflow.add_node("save_memory",  save_memory_node)
+
+    # Core agent nodes (unchanged from Phase 4)
+    workflow.add_node("research",     research_agent)
+    workflow.add_node("scoring",      scoring_agent)
+    workflow.add_node("outreach",     outreach_agent)
+
+    # Flow: memory → core agents → memory
+    workflow.set_entry_point("load_memory")
+    workflow.add_edge("load_memory", "research")
+    workflow.add_edge("research",    "scoring")
+    workflow.add_edge("scoring",     "outreach")
+    workflow.add_edge("outreach",    "save_memory")
+    workflow.add_edge("save_memory", END)
+
+    return workflow.compile(checkpointer=checkpointer)</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- TIME TRAVEL -->
+  <section id="time-travel">
+    <div class="phase-card">
+      <div class="phase-hdr">
+        <div class="phase-icon" style="background:rgba(217,91,171,.15)">⏱️</div>
+        <div>
+          <h2 style="margin:0 0 4px"><span class="sec-num" style="border-color:var(--pink);color:var(--pink)">5</span> Time travel — branching deal conversations</h2>
+          <p style="margin:0;font-size:13px">An AE approved a follow-up angle, then changed their mind. Time travel lets them fork the conversation from any prior checkpoint without losing the original thread.</p>
+        </div>
+      </div>
+
+      <div class="callout callout-purple">
+        <div class="callout-tag">GTM scenario</div>
+        <p>AE generates an outreach email, then realizes they want to try a completely different angle (product-led vs. ROI-led). Instead of starting over, they branch from the checkpoint just before the outreach node and try again — both branches preserved in Lakebase.</p>
+      </div>
+
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">memory/05_time_travel.py</span></div>
+        <pre><code class="language-python"># ── GTM time travel example ───────────────────────────────────────────
+
+# 1. Start a session about Acme Corp
+response1 = AGENT.predict({
+    "input": [{"role": "user",
+               "content": "Analyze OPP-4821 (Acme Corp) and draft a follow-up email focused on ROI."}],
+    "custom_inputs": {"ae_id": "ae-jamie-torres"}
+})
+thread_id = response1.custom_outputs["thread_id"]
+print(f"Session thread: {thread_id}")
+print(response1)
+
+# 2. Continue in same thread — agent remembers OPP-4821 context
+response2 = AGENT.predict({
+    "input": [{"role": "user", "content": "Make the subject line punchier."}],
+    "custom_inputs": {"thread_id": thread_id, "ae_id": "ae-jamie-torres"}
+})
+
+# 3. AE wants to try a completely different angle — inspect checkpoint history
+history = AGENT.get_checkpoint_history(thread_id, limit=10)
+print("Checkpoint history:")
+for i, ckpt in enumerate(history):
+    print(f"  [{i}] {ckpt['timestamp']} | next={ckpt['next_nodes']} | msgs={ckpt['message_count']}")
+
+# 4. Branch from the checkpoint just before the outreach node ran
+#    (find the checkpoint where next_nodes includes 'outreach')
+branch_point = next(
+    (h["checkpoint_id"] for h in history if "outreach" in str(h["next_nodes"])),
+    history[-1]["checkpoint_id"]  # Fallback to oldest
+)
+
+# 5. Fork the conversation — try a product-led growth angle instead
+response_fork = AGENT.predict({
+    "input": [{"role": "user",
+               "content": "Actually, try a product-led angle instead — lead with their usage data, not ROI metrics."}],
+    "custom_inputs": {
+        "thread_id":     thread_id,      # Same thread
+        "checkpoint_id": branch_point,   # Branch from this checkpoint
+        "ae_id":         "ae-jamie-torres"
+    }
+})
+# Both branches (ROI-led and PLG-led) are now preserved in Lakebase.
+# The AE can compare them side-by-side in the App UI.
+branched_checkpoint = response_fork.custom_outputs["checkpoint_id"]
+print(f"Original branch checkpoint: {branch_point}")
+print(f"New fork checkpoint:        {branched_checkpoint}")
+print(response_fork)</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- APP LAYER -->
+  <section id="app-layer">
+    <div class="phase-card">
+      <div class="phase-hdr">
+        <div class="phase-icon" style="background:rgba(94,189,58,.15)">🖥️</div>
+        <div>
+          <h2 style="margin:0 0 4px"><span class="sec-num" style="border-color:var(--green);color:var(--green)">6</span> App layer — thread ID management</h2>
+          <p style="margin:0;font-size:13px">The Databricks Apps AE interface must persist <code>thread_id</code> client-side and pass it on every turn. This is the only AE-visible surface change.</p>
+        </div>
+      </div>
+
+      <div class="callout callout-info">
+        <div class="callout-tag">Playground & Review App</div>
+        <p>When using the AI Playground or Review App, <code>thread_id</code> and <code>user_id</code> are passed automatically via <code>ChatContext</code>. No extra wiring needed for those surfaces — only the custom Databricks Apps UI requires manual <code>thread_id</code> management.</p>
+      </div>
+
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">memory/06_app_client.py</span></div>
+        <pre><code class="language-python">from databricks.sdk import WorkspaceClient
+from openai import OpenAI
+import streamlit as st
+
+w      = WorkspaceClient()
+client = OpenAI(
+    base_url=f"{w.config.host}/serving-endpoints",
+    api_key=w.config.token
+)
+
+# ── Streamlit AE chat app ─────────────────────────────────────────────
+st.title("Deal Intelligence Agent")
+
+# Session state: persist thread_id across Streamlit reruns
+if "thread_id" not in st.session_state:
+    st.session_state.thread_id = None   # None = new session, agent will generate one
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# ── "New conversation" button ────────────────────────────────────────
+col1, col2 = st.columns([3, 1])
+with col2:
+    if st.button("New conversation"):
+        st.session_state.thread_id = None
+        st.session_state.messages  = []
+        st.rerun()
+
+# Display prior messages in this session
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
+
+# ── Chat input ────────────────────────────────────────────────────────
+if prompt := st.chat_input("Ask about a deal, account, or generate outreach..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    with st.chat_message("user"):
+        st.write(prompt)
+
+    with st.chat_message("assistant"):
+        placeholder = st.empty()
+
+        # Pass thread_id so the agent checkpoints to the right session
+        custom_inputs = {
+            "ae_id": st.experimental_user.email,  # AE identity from SSO
+        }
+        if st.session_state.thread_id:
+            custom_inputs["thread_id"] = st.session_state.thread_id
+
+        # Stream the response
+        full_response = ""
+        stream = client.responses.create(
+            model="gtm-deal-intelligence",   # Your Model Serving endpoint
+            input=[{"role": "user", "content": prompt}],
+            stream=True,
+            extra_body={"custom_inputs": custom_inputs}
+        )
+
+        for chunk in stream:
+            if chunk.type == "response.output_text.delta":
+                full_response += chunk.delta
+                placeholder.markdown(full_response + "▌")
+
+        placeholder.markdown(full_response)
+
+        # Persist thread_id returned by the agent (first turn generates it)
+        if hasattr(stream, "custom_outputs") and stream.custom_outputs:
+            st.session_state.thread_id = stream.custom_outputs.get(
+                "thread_id", st.session_state.thread_id
+            )
+
+        st.session_state.messages.append({"role": "assistant", "content": full_response})</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- UC GOVERNANCE FOR MEMORY -->
+  <section id="uc-governance">
+    <div class="phase-card">
+      <div class="phase-hdr">
+        <div class="phase-icon" style="background:rgba(232,93,46,.15)">🔒</div>
+        <div>
+          <h2 style="margin:0 0 4px"><span class="sec-num" style="border-color:var(--coral);color:var(--coral)">7</span> Governance for memory tables</h2>
+          <p style="margin:0;font-size:13px">AE preferences and deal decisions are personal data. Unity Catalog policies ensure AEs only see their own memories, while account context is appropriately shared within the account team.</p>
+        </div>
+      </div>
+
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">SQL</span><span class="code-file">memory/07_uc_memory_policy.sql</span></div>
+        <pre><code class="language-sql">-- AE profiles: strictly personal — only the AE and managers
+CREATE ROW FILTER gtm.security.ae_profile_filter
+  ON gtm.memory.ae_profiles (ae_id VARCHAR)
+  AS ae_id = CURRENT_USER()
+  OR IS_MEMBER('sales-leadership');
+
+ALTER TABLE gtm.memory.ae_profiles
+  ADD ROW FILTER gtm.security.ae_profile_filter ON (ae_id);
+
+-- Account context: shared across AEs on the same account team,
+-- but restricted by territory (same policy as opportunities)
+CREATE ROW FILTER gtm.security.account_context_filter
+  ON gtm.memory.account_context (ae_id VARCHAR)
+  AS EXISTS (
+    SELECT 1 FROM gtm.accounts a
+    WHERE a.account_id = account_context.account_id
+      AND (a.ae_owner = CURRENT_USER() OR IS_MEMBER('sales-leadership'))
+  );
+
+ALTER TABLE gtm.memory.account_context
+  ADD ROW FILTER gtm.security.account_context_filter ON (ae_id);
+
+-- Deal decisions: visible to the AE and their manager
+CREATE ROW FILTER gtm.security.decision_filter
+  ON gtm.memory.deal_decisions (ae_id VARCHAR)
+  AS ae_id = CURRENT_USER()
+  OR IS_MEMBER('sales-leadership')
+  OR IS_MEMBER('revenue-operations');
+
+ALTER TABLE gtm.memory.deal_decisions
+  ADD ROW FILTER gtm.security.decision_filter ON (ae_id);
+
+-- Audit: who read which AE's memory and when
+-- (Lineage captured automatically by Unity Catalog for all table reads)</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- GTM EXAMPLES -->
+  <section id="gtm-examples">
+    <h2>GTM memory in action — example scenarios</h2>
+
+    <h3>Short-term: multi-turn refinement</h3>
+    <div class="code-wrap">
+      <div class="code-header"><span class="code-lang">Text</span><span class="code-file">Conversation example — same session</span></div>
+      <pre><code class="language-plaintext">AE:    "Analyze OPP-4821 (Acme Corp) and draft a follow-up for tomorrow's call."
+
+AGENT: [Runs research + scoring + outreach nodes]
+       Deal health: 72/100. Risk: champion going quiet (last Gong call 18 days ago).
+       Draft: "Hi Sarah, following up on our conversation about consolidating your 
+       data stack ahead of the Q2 board review..."
+
+AE:    "Make it shorter and lead with the product usage angle instead."
+
+AGENT: [Retrieves prior draft from LangGraph checkpoint — no re-retrieval from Gong]
+       "Hi Sarah, your team's been using our pipeline builder daily — 
+       let's connect before Q2 board prep kicks off. 10 minutes Thursday?"
+
+AE:    "Change the subject line to something about their Snowflake migration."
+
+AGENT: [Still in the same checkpoint thread — knows the account, the draft, the prior asks]
+       Subject: "Your Snowflake migration + what we're seeing in your usage data"</code></pre>
+    </div>
+
+    <h3>Long-term: preferences remembered across sessions</h3>
+    <div class="code-wrap">
+      <div class="code-header"><span class="code-lang">Text</span><span class="code-file">Cross-session learning example</span></div>
+      <pre><code class="language-plaintext">── Session 1 (Monday) ──────────────────────────────────────────────
+AE:    "Draft an outreach for GlobalBank."
+AGENT: [Generates 280-word email]
+AE:    "This is way too long. Keep it under 120 words always."
+
+── Memory extraction (session close) ───────────────────────────────
+Extracted preference: {"email_max_words": 120, "confidence": 0.97}
+Stored to: gtm.memory.ae_profiles WHERE ae_id = 'ae-jamie'
+
+── Session 2 (Wednesday) ───────────────────────────────────────────
+Memory prefix injected silently at session start:
+  ## AE PREFERENCES
+  - Keep emails under 120 words
+
+AE:    "Draft an outreach for RetailCo."
+AGENT: [Generates 108-word email — preference applied without being asked]
+AE:    "Perfect."
+
+── Session 3 (Friday) ──────────────────────────────────────────────
+AE:    "What did we learn about Acme Corp last week?"
+AGENT: [Retrieves from gtm.memory.account_context]
+       "Based on your session last Monday: champion changed from Sarah Chen (VP Sales) 
+       to Mike Torres (VP Engineering). Budget is frozen through Q1 — revisit April.
+       You also noted they're evaluating Databricks against Snowflake for the migration."</code></pre>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-tag">RevOps insight</div>
+      <p>The <code>gtm.memory.deal_decisions</code> table gives RevOps a goldmine: which agent recommendations did AEs accept vs. reject, and what were the deal outcomes? This feeds back into the Quotient AI RL loop, making future recommendations better calibrated to how <em>your team actually sells</em>.</p>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <p style="text-align:center;font-size:12px;color:var(--faint);">GTM Deal Intelligence Agent · Memory Layer Addendum · Built on Databricks Stateful Agents + Lakebase</p>
+
+</main>
+</div>
+
+<script>hljs.highlightAll();</script>
+</body>
+</html>

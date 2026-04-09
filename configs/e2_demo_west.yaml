@@ -1,0 +1,28 @@
+# GTM Deal Intelligence Agent — e2-demo-west workspace config
+# Catalog: users, Schema: aradhya_chouhan
+
+model:
+  research_model: databricks-claude-sonnet-4-6
+  scoring_model: databricks-claude-sonnet-4-6
+  outreach_model: databricks-claude-sonnet-4-6
+  memory_extraction_model: databricks-claude-haiku-4-5
+
+data:
+  catalog: users
+  crm_schema: aradhya_chouhan
+  vector_search_endpoint: dbdemos_vs_endpoint
+  call_transcripts_index: users.aradhya_chouhan.gtm_transcripts_idx
+  battlecards_index: users.aradhya_chouhan.gtm_battlecards_idx
+  deal_stories_index: users.aradhya_chouhan.gtm_stories_idx
+
+lakebase:
+  instance_name: gtm-memory
+  memory_schema: users.aradhya_chouhan
+
+mlflow:
+  experiment_name: /Users/aradhya.chouhan@databricks.com/gtm-deal-intelligence
+  autolog: true
+
+serving:
+  endpoint_name: gtm-deal-intelligence
+  scale_to_zero: true

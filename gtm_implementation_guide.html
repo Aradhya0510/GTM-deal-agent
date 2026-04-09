@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GTM Deal Intelligence Agent — Databricks Implementation Guide</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+:root {
+  --bg: #0d1117; --bg2: #161b27; --bg3: #1e2535; --surface: #242d3e;
+  --border: rgba(255,255,255,0.07); --border2: rgba(255,255,255,0.12);
+  --text: #e2e8f4; --muted: #8b96ad; --faint: #4a5470;
+  --red: #FF3621; --purple: #7c6df0; --teal: #17c8a0;
+  --blue: #4b9cf5; --amber: #f0a530; --coral: #e85d2e; --green: #5ebd3a;
+  --pink: #d95bab;
+  --font: 'Segoe UI', system-ui, sans-serif;
+  --mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.6; }
+
+/* LAYOUT */
+.layout { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; max-width: 1200px; margin: 0 auto; }
+.sidebar { position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: 32px 20px; border-right: 1px solid var(--border); }
+.main { padding: 48px 52px; max-width: 860px; }
+
+/* SIDEBAR */
+.sidebar-logo { font-size: 11px; font-weight: 700; color: var(--red); letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
+.sidebar-title { font-size: 12px; color: var(--muted); margin-bottom: 28px; line-height: 1.4; }
+.nav-section { font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin: 20px 0 8px; }
+.nav-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 12px; color: var(--muted); cursor: pointer; text-decoration: none; transition: color .15s; }
+.nav-item:hover { color: var(--text); }
+.nav-item .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.nav-item.active { color: var(--text); }
+
+/* HEADINGS */
+h1 { font-size: 28px; font-weight: 800; color: var(--text); line-height: 1.2; margin-bottom: 12px; }
+h2 { font-size: 18px; font-weight: 700; color: var(--text); margin: 48px 0 16px; display: flex; align-items: center; gap: 10px; }
+h2 .phase-num { background: var(--surface); border: 1px solid var(--border2); width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--muted); flex-shrink: 0; }
+h3 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 24px 0 10px; }
+p { color: var(--muted); margin-bottom: 14px; line-height: 1.7; }
+a { color: var(--blue); text-decoration: none; }
+
+/* HERO */
+.hero-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,54,33,.12); border: 1px solid rgba(255,54,33,.25); color: var(--red); font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 4px; margin-bottom: 20px; letter-spacing: .04em; text-transform: uppercase; }
+.hero-sub { font-size: 15px; color: var(--muted); line-height: 1.65; max-width: 640px; margin-bottom: 32px; }
+.kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 40px; }
+.kpi { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+.kpi-val { font-size: 22px; font-weight: 800; color: var(--text); margin-bottom: 2px; }
+.kpi-label { font-size: 11px; color: var(--faint); }
+
+/* SECTION DIVIDER */
+.divider { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+
+/* ARCHITECTURE MAP TABLE */
+.arch-table { width: 100%; border-collapse: collapse; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); margin-bottom: 14px; }
+.arch-table th { background: var(--bg3); font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); padding: 10px 14px; text-align: left; }
+.arch-table td { padding: 12px 14px; border-top: 1px solid var(--border); vertical-align: top; font-size: 13px; }
+.arch-table tr:hover td { background: rgba(255,255,255,.02); }
+.layer-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 4px; white-space: nowrap; }
+.layer-badge .pip { width: 6px; height: 6px; border-radius: 50%; }
+td.desc { color: var(--muted); }
+td.gtm-use { color: var(--text); font-weight: 500; }
+
+/* CODE BLOCKS */
+.code-wrap { margin: 14px 0 20px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+.code-header { background: var(--bg3); padding: 8px 14px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+.code-lang { font-size: 11px; font-weight: 600; color: var(--faint); letter-spacing: .06em; text-transform: uppercase; }
+.code-file { font-size: 11px; color: var(--faint); font-family: var(--mono); }
+pre { margin: 0 !important; border-radius: 0 !important; background: #0d1117 !important; }
+pre code { font-size: 12px !important; line-height: 1.55 !important; font-family: var(--mono) !important; padding: 16px !important; }
+
+/* CALLOUT BOXES */
+.callout { border-radius: 8px; padding: 14px 16px; margin: 16px 0; border-left: 3px solid; }
+.callout-info { background: rgba(75,156,245,.08); border-color: var(--blue); }
+.callout-warn { background: rgba(240,165,48,.08); border-color: var(--amber); }
+.callout-tip  { background: rgba(23,200,160,.08); border-color: var(--teal); }
+.callout-tag { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 4px; }
+.callout-info .callout-tag { color: var(--blue); }
+.callout-warn .callout-tag { color: var(--amber); }
+.callout-tip  .callout-tag { color: var(--teal); }
+.callout p { margin: 0; font-size: 13px; }
+
+/* PHASE CARD */
+.phase-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 28px; margin-bottom: 36px; }
+.phase-header { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
+.phase-icon { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+.phase-meta h2 { margin: 0 0 4px; font-size: 16px; }
+.phase-meta .service-tag { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 4px; }
+.phase-meta p { margin: 0; font-size: 13px; }
+
+/* COMPONENT CHIPS */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 16px; }
+.chip { font-size: 11px; padding: 3px 9px; border-radius: 4px; border: 1px solid var(--border2); color: var(--muted); font-weight: 500; }
+
+/* FLOW DIAGRAM */
+.flow { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding: 4px 0 12px; margin-bottom: 8px; }
+.flow-step { flex: 1; min-width: 120px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 12px 10px; text-align: center; }
+.flow-arrow { display: flex; align-items: center; padding: 0 6px; color: var(--faint); font-size: 16px; flex-shrink: 0; }
+.flow-step-num { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 4px; }
+.flow-step-name { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+.flow-step-service { font-size: 10px; color: var(--faint); }
+
+/* OUTPUT TAG */
+.output-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--teal); background: rgba(23,200,160,.1); border: 1px solid rgba(23,200,160,.2); padding: 4px 10px; border-radius: 4px; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+<!-- SIDEBAR NAV -->
+<aside class="sidebar">
+  <div class="sidebar-logo">Databricks</div>
+  <div class="sidebar-title">GTM Deal Intelligence Agent — Implementation Guide</div>
+
+  <div class="nav-section">Overview</div>
+  <a class="nav-item" href="#use-case"><span class="dot" style="background:var(--red)"></span>Use case</a>
+  <a class="nav-item" href="#arch-map"><span class="dot" style="background:var(--purple)"></span>Architecture mapping</a>
+  <a class="nav-item" href="#data-flow"><span class="dot" style="background:var(--blue)"></span>End-to-end data flow</a>
+
+  <div class="nav-section">Implementation</div>
+  <a class="nav-item" href="#phase0"><span class="dot" style="background:var(--amber)"></span>Phase 0 · Data foundation</a>
+  <a class="nav-item" href="#phase1"><span class="dot" style="background:var(--purple)"></span>Phase 1 · Prototype</a>
+  <a class="nav-item" href="#phase2"><span class="dot" style="background:var(--teal)"></span>Phase 2 · Knowledge layer</a>
+  <a class="nav-item" href="#phase3"><span class="dot" style="background:var(--blue)"></span>Phase 3 · Optimize</a>
+  <a class="nav-item" href="#phase4"><span class="dot" style="background:var(--amber)"></span>Phase 4 · Build</a>
+  <a class="nav-item" href="#phase5"><span class="dot" style="background:var(--coral)"></span>Phase 5 · Govern &amp; secure</a>
+  <a class="nav-item" href="#phase6"><span class="dot" style="background:var(--green)"></span>Phase 6 · Evaluate &amp; deploy</a>
+
+  <div class="nav-section">Reference</div>
+  <a class="nav-item" href="#testing"><span class="dot" style="background:var(--pink)"></span>Testing strategy</a>
+  <a class="nav-item" href="#infra"><span class="dot" style="background:var(--faint)"></span>Infrastructure checklist</a>
+</aside>
+
+<!-- MAIN CONTENT -->
+<main class="main">
+
+  <!-- HERO -->
+  <section id="use-case">
+    <div class="hero-badge">GTM Use Case · B2B SaaS</div>
+    <h1>Deal Intelligence &amp;<br>Personalized Outreach Agent</h1>
+    <p class="hero-sub">A multi-agent system that helps account executives prioritize pipeline, surface deal risks, retrieve competitive intelligence, and generate hyper-personalized outreach — all grounded in your CRM, call recordings, and product usage data.</p>
+
+    <div class="kpi-row">
+      <div class="kpi">
+        <div class="kpi-val" style="color:var(--teal)">40%</div>
+        <div class="kpi-label">Reduction in time-to-first-outreach per AE</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-val" style="color:var(--amber)">3×</div>
+        <div class="kpi-label">Increase in personalization coverage across accounts</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-val" style="color:var(--purple)">62%</div>
+        <div class="kpi-label">Deal risk flags surfaced before forecast calls</div>
+      </div>
+    </div>
+
+    <h3>Who uses it</h3>
+    <div class="chips">
+      <span class="chip">Account Executives</span>
+      <span class="chip">Sales Development Reps</span>
+      <span class="chip">Revenue Operations</span>
+      <span class="chip">Sales Engineering</span>
+      <span class="chip">Sales Leadership</span>
+    </div>
+
+    <h3>What the agent does</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
+      <div class="callout callout-info">
+        <div class="callout-tag">Research</div>
+        <p>Pulls account history, champion mapping, and engagement signals from CRM, Gong, and product usage into a unified rep briefing.</p>
+      </div>
+      <div class="callout callout-tip">
+        <div class="callout-tag">Outreach</div>
+        <p>Generates personalized email sequences, call talk tracks, and LinkedIn messages tailored to the account's pain points and deal stage.</p>
+      </div>
+      <div class="callout callout-warn">
+        <div class="callout-tag">Deal Risk</div>
+        <p>Scores deals daily on health, velocity, and engagement. Surfaces specific risks (ghosting, champion change, competing vendor) with recommended interventions.</p>
+      </div>
+      <div class="callout callout-info">
+        <div class="callout-tag">Competitive Intel</div>
+        <p>Retrieves live battlecard snippets and win/loss stories from your sales enablement knowledge base relevant to the specific deal context.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ARCHITECTURE MAPPING -->
+  <section id="arch-map">
+    <h2>Architecture mapping</h2>
+    <p>How every layer of the Databricks stack serves this GTM use case.</p>
+
+    <table class="arch-table">
+      <thead>
+        <tr>
+          <th>Layer</th>
+          <th>Component</th>
+          <th>GTM Application</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="layer-badge" style="background:rgba(124,109,240,.15);color:var(--purple)"><span class="pip" style="background:var(--purple)"></span>Apps</span></td>
+          <td class="gtm-use">Databricks Apps</td>
+          <td class="desc">AE-facing web interface — account briefings, outreach drafts, deal risk dashboard</td>
+        </tr>
+        <tr>
+          <td><span class="layer-badge" style="background:rgba(23,200,160,.15);color:var(--teal)"><span class="pip" style="background:var(--teal)"></span>Orchestration</span></td>
+          <td class="gtm-use">Agent Framework (LangGraph)</td>
+          <td class="desc">Multi-agent graph: Research Agent → Scoring Agent → Outreach Agent → Risk Agent with shared memory</td>
+        </tr>
+        <tr>
+          <td><span class="layer-badge" style="background:rgba(23,200,160,.15);color:var(--teal)"><span class="pip" style="background:var(--teal)"></span>Orchestration</span></td>
+          <td class="gtm-use">Tool execution &amp; MCP</td>
+          <td class="desc">Salesforce MCP (live CRM reads/writes), Gong MCP (call transcripts), custom UC tools for scoring</td>
+        </tr>
+        <tr>
+          <td><span class="layer-badge" style="background:rgba(75,156,245,.15);color:var(--blue)"><span class="pip" style="background:var(--blue)"></span>Intelligence</span></td>
+          <td class="gtm-use">Model Serving</td>
+          <td class="desc">Claude Sonnet for research & outreach generation; fine-tuned Llama 3 for deal health scoring</td>
+        </tr>
+        <tr>
+          <td><span class="layer-badge" style="background:rgba(75,156,245,.15);color:var(--blue)"><span class="pip" style="background:var(--blue)"></span>Intelligence</span></td>
+          <td class="gtm-use">LLM Gateway</td>
+          <td class="desc">Per-team token budgets, route expensive calls to optimized models, block PII in outputs</td>
+        </tr>
+        <tr>
+          <td><span class="layer-badge" style="background:rgba(75,156,245,.15);color:var(--blue)"><span class="pip" style="background:var(--blue)"></span>Intelligence</span></td>
+          <td class="gtm-use">Mosaic AI</td>
+          <td class="desc">Fine-tune Llama 3.1 on 3 years of won/lost deal patterns to power the deal health scorer</td>
+        </tr>
+        <tr>
+          <td><span class="layer-badge" style="background:rgba(240,165,48,.15);color:var(--amber)"><span class="pip" style="background:var(--amber)"></span>Data</span></td>
+          <td class="gtm-use">Lakebase</td>
+          <td class="desc">Operational store for CRM records, deal state, outreach history — agents create 4× more DB branches than humans</td>
+        </tr>
+        <tr>
+          <td><span class="layer-badge" style="background:rgba(240,165,48,.15);color:var(--amber)"><span class="pip" style="background:var(--amber)"></span>Data</span></td>
+          <td class="gtm-use">Vector Search</td>
+          <td class="desc">Semantic search over Gong transcripts, email threads, battlecards, and product release notes</td>
+        </tr>
+        <tr>
+          <td><span class="layer-badge" style="background:rgba(240,165,48,.15);color:var(--amber)"><span class="pip" style="background:var(--amber)"></span>Data</span></td>
+          <td class="gtm-use">UC Functions</td>
+          <td class="desc">Python/SQL tools: calculate_deal_health(), get_account_signals(), rank_open_opportunities()</td>
+        </tr>
+        <tr>
+          <td><span class="layer-badge" style="background:rgba(232,93,46,.15);color:var(--coral)"><span class="pip" style="background:var(--coral)"></span>Governance</span></td>
+          <td class="gtm-use">Unity Catalog</td>
+          <td class="desc">Row-level security by territory, column masking on PII fields, lineage for all agent reads/writes</td>
+        </tr>
+        <tr>
+          <td><span class="layer-badge" style="background:rgba(232,93,46,.15);color:var(--coral)"><span class="pip" style="background:var(--coral)"></span>Security</span></td>
+          <td class="gtm-use">Lakewatch</td>
+          <td class="desc">Detect contact data exfiltration, prompt injection in user inputs, anomalous outreach volume spikes</td>
+        </tr>
+        <tr>
+          <td><span class="layer-badge" style="background:rgba(94,189,58,.15);color:var(--green)"><span class="pip" style="background:var(--green)"></span>Observability</span></td>
+          <td class="gtm-use">MLflow 3.0</td>
+          <td class="desc">Full trace per agent invocation: which tool was called, what was retrieved, latency per node</td>
+        </tr>
+        <tr>
+          <td><span class="layer-badge" style="background:rgba(94,189,58,.15);color:var(--green)"><span class="pip" style="background:var(--green)"></span>Observability</span></td>
+          <td class="gtm-use">Agent Evaluation</td>
+          <td class="desc">AI judges grade outreach personalization, groundedness of deal risk claims, and relevance of retrieved intel</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <hr class="divider">
+
+  <!-- DATA FLOW -->
+  <section id="data-flow">
+    <h2>End-to-end data flow</h2>
+    <p>A rep asks: <em style="color:var(--text)">"What's the deal health on Acme Corp and draft a follow-up email for tomorrow's call?"</em></p>
+
+    <div class="flow">
+      <div class="flow-step" style="border-top:2px solid var(--purple)">
+        <div class="flow-step-num" style="color:var(--purple)">1 · App</div>
+        <div class="flow-step-name">Rep query</div>
+        <div class="flow-step-service">Databricks Apps</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step" style="border-top:2px solid var(--teal)">
+        <div class="flow-step-num" style="color:var(--teal)">2 · Orchestrate</div>
+        <div class="flow-step-name">Route to agents</div>
+        <div class="flow-step-service">LangGraph supervisor</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step" style="border-top:2px solid var(--amber)">
+        <div class="flow-step-num" style="color:var(--amber)">3 · Data</div>
+        <div class="flow-step-name">Retrieve context</div>
+        <div class="flow-step-service">Lakebase + Vector Search</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step" style="border-top:2px solid var(--blue)">
+        <div class="flow-step-num" style="color:var(--blue)">4 · Score</div>
+        <div class="flow-step-name">Health score</div>
+        <div class="flow-step-service">Fine-tuned Llama 3.1</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step" style="border-top:2px solid var(--blue)">
+        <div class="flow-step-num" style="color:var(--blue)">5 · Generate</div>
+        <div class="flow-step-name">Draft outreach</div>
+        <div class="flow-step-service">Claude via LLM Gateway</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step" style="border-top:2px solid var(--green)">
+        <div class="flow-step-num" style="color:var(--green)">6 · Observe</div>
+        <div class="flow-step-name">Trace + eval</div>
+        <div class="flow-step-service">MLflow 3.0</div>
+      </div>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-tag">Unity Catalog</div>
+      <p>Enforces territory-based row filtering at every data read — an AE in West only retrieves their accounts. Lakewatch monitors the full trace for anomalous data patterns.</p>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- PHASE 0 -->
+  <section id="phase0">
+    <div class="phase-card">
+      <div class="phase-header">
+        <div class="phase-icon" style="background:rgba(240,165,48,.15)">🗄️</div>
+        <div class="phase-meta">
+          <h2><span class="phase-num" style="border-color:var(--amber);color:var(--amber)">0</span> Data foundation</h2>
+          <p>Set up Lakebase schema, Vector Search indexes, and UC Functions — the grounding layer the agents will query.</p>
+        </div>
+      </div>
+
+      <h3>Lakebase — CRM operational store</h3>
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">SQL</span><span class="code-file">00_create_schema.sql</span></div>
+        <pre><code class="language-sql">-- Lakebase: open Postgres storage on the lake
+-- Agents create 4x more DB branches than humans — perfect for deal experiments
+
+CREATE SCHEMA IF NOT EXISTS gtm;
+
+CREATE TABLE gtm.accounts (
+  account_id     VARCHAR PRIMARY KEY,
+  company_name   VARCHAR NOT NULL,
+  industry       VARCHAR,
+  arr            NUMERIC(12,2),
+  territory      VARCHAR,       -- used for UC row-level security
+  csm_owner      VARCHAR,
+  ae_owner       VARCHAR,
+  health_score   NUMERIC(4,2),
+  last_updated   TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE gtm.opportunities (
+  opp_id         VARCHAR PRIMARY KEY,
+  account_id     VARCHAR REFERENCES gtm.accounts(account_id),
+  stage          VARCHAR,
+  amount         NUMERIC(12,2),
+  close_date     DATE,
+  next_step      TEXT,
+  competing_with VARCHAR[],
+  territory      VARCHAR,
+  updated_at     TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE gtm.outreach_log (
+  log_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  opp_id         VARCHAR REFERENCES gtm.opportunities(opp_id),
+  ae_id          VARCHAR,
+  channel        VARCHAR,       -- email | linkedin | call
+  draft_text     TEXT,
+  approved       BOOLEAN DEFAULT FALSE,
+  sent_at        TIMESTAMP,
+  created_at     TIMESTAMP DEFAULT NOW()
+);</code></pre>
+      </div>
+
+      <h3>Vector Search — semantic retrieval indexes</h3>
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">01_vector_indexes.py</span></div>
+        <pre><code class="language-python">from databricks.vector_search.client import VectorSearchClient
+
+vsc = VectorSearchClient()
+
+# Index 1: Gong call transcripts — for account context retrieval
+vsc.create_delta_sync_index(
+    endpoint_name="gtm_vs_endpoint",
+    index_name="gtm.vectors.call_transcripts",
+    source_table_name="gtm.raw.gong_transcripts",
+    pipeline_type="TRIGGERED",
+    primary_key="transcript_id",
+    embedding_source_column="transcript_text",
+    embedding_model_endpoint_name="databricks-gte-large-en",
+    columns_to_sync=["account_id", "call_date", "participants", "summary"]
+)
+
+# Index 2: Sales battlecards + competitive intel
+vsc.create_delta_sync_index(
+    endpoint_name="gtm_vs_endpoint",
+    index_name="gtm.vectors.battlecards",
+    source_table_name="gtm.enablement.battlecards",
+    pipeline_type="TRIGGERED",
+    primary_key="card_id",
+    embedding_source_column="content",
+    embedding_model_endpoint_name="databricks-gte-large-en",
+    columns_to_sync=["competitor", "use_case", "win_themes", "objection_handlers"]
+)
+
+# Index 3: Won/lost deal stories for personalization context
+vsc.create_delta_sync_index(
+    endpoint_name="gtm_vs_endpoint",
+    index_name="gtm.vectors.deal_stories",
+    source_table_name="gtm.enablement.win_loss_stories",
+    pipeline_type="TRIGGERED",
+    primary_key="story_id",
+    embedding_source_column="narrative",
+    embedding_model_endpoint_name="databricks-gte-large-en",
+    columns_to_sync=["industry", "use_case", "outcome", "key_moments"]
+)</code></pre>
+      </div>
+
+      <h3>UC Functions — agent tools for deal intelligence</h3>
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">02_uc_tools.py</span></div>
+        <pre><code class="language-python">from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.catalog import FunctionParameterType
+
+w = WorkspaceClient()
+
+# Tool 1: Calculate live deal health score
+w.functions.create(
+    name="gtm.tools.calculate_deal_health",
+    catalog_name="gtm",
+    schema_name="tools",
+    input_params=[{"name": "opp_id", "type_text": "STRING", "position": 0}],
+    return_type_text="STRING",
+    routine_body="EXTERNAL",
+    routine_definition="""
+      SELECT json_object(
+        'health_score',  ROUND(
+            (CASE WHEN stage IN ('Proposal','Negotiation') THEN 30 ELSE 10 END) +
+            (CASE WHEN last_contact_days < 7 THEN 20 ELSE 0 END) +
+            (CASE WHEN num_stakeholders >= 3 THEN 25 ELSE 10 END) +
+            (CASE WHEN close_date > CURRENT_DATE THEN 15 ELSE 0 END)
+        , 1),
+        'stage',         stage,
+        'days_to_close', DATEDIFF(close_date, CURRENT_DATE),
+        'risk_flags',    risk_flags,
+        'champion',      champion_name
+      ) FROM gtm.opportunities_enriched
+      WHERE opp_id = :opp_id
+    """,
+    comment="Returns deal health score (0-100) and risk flags for an opportunity"
+)
+
+# Tool 2: Get account signals (engagement, product usage, sentiment)
+w.functions.create(
+    name="gtm.tools.get_account_signals",
+    catalog_name="gtm",
+    schema_name="tools",
+    input_params=[{"name": "account_id", "type_text": "STRING", "position": 0}],
+    return_type_text="STRING",
+    routine_body="EXTERNAL",
+    routine_definition="""
+      SELECT json_object(
+        'product_dau',       avg_dau_last_30d,
+        'feature_adoption',  top_features_used,
+        'support_tickets',   open_p1_tickets,
+        'sentiment_score',   gong_sentiment_avg,
+        'last_exec_touch',   last_exec_touchpoint,
+        'renewal_in_days',   renewal_days_remaining
+      ) FROM gtm.account_360
+      WHERE account_id = :account_id
+    """,
+    comment="Returns product usage, support, and sentiment signals for an account"
+)</code></pre>
+      </div>
+      <div class="output-tag">✓ Output: CRM tables in Lakebase · 3 Vector Search indexes · 2 UC Function tools</div>
+    </div>
+  </section>
+
+  <!-- PHASE 1 -->
+  <section id="phase1">
+    <div class="phase-card">
+      <div class="phase-header">
+        <div class="phase-icon" style="background:rgba(124,109,240,.15)">🧪</div>
+        <div class="phase-meta">
+          <h2><span class="phase-num" style="border-color:var(--purple);color:var(--purple)">1</span> Prototype with AI Playground</h2>
+          <p>Validate your agent concept in minutes — no code required. Select an LLM, attach your Vector Search index and UC tools, and test real queries from your AEs.</p>
+        </div>
+      </div>
+
+      <div class="callout callout-info">
+        <div class="callout-tag">AI Playground — no-code start</div>
+        <p>In AI Playground: select <strong>claude-3-5-sonnet</strong>, add <code>gtm.vectors.call_transcripts</code> as a Vector Search tool, add <code>gtm.tools.calculate_deal_health</code> as a UC Function, and run test queries. Export to Python when quality looks right.</p>
+      </div>
+
+      <h3>Exported agent skeleton (from AI Playground)</h3>
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">03_playground_export.py</span></div>
+        <pre><code class="language-python">import mlflow
+from databricks.agents import ResponsesAgent
+from databricks.agents.tools import VectorSearchRetriever, UCFunctionTool
+
+mlflow.set_experiment("/gtm/deal-intelligence-agent")
+
+# System prompt — ground the agent in GTM context
+SYSTEM_PROMPT = """You are an expert GTM intelligence assistant for B2B SaaS account executives.
+
+You have access to:
+- Live CRM data and deal health calculations
+- Gong call transcripts and account history
+- Competitive battlecards and win/loss stories
+- Product usage and engagement signals
+
+When asked about a deal or account:
+1. ALWAYS calculate the current deal health score first
+2. Retrieve the 3 most relevant call transcripts for context
+3. Check for any active risk flags before making recommendations
+4. Ground all outreach in specific signals (usage data, conversation topics, stakeholder names)
+
+Respond with concrete, actionable intelligence — not generic advice."""
+
+# Build agent with tools
+agent = ResponsesAgent(
+    model="databricks/claude-3-5-sonnet",
+    tools=[
+        VectorSearchRetriever(
+            index_name="gtm.vectors.call_transcripts",
+            columns=["transcript_text", "call_date", "participants", "summary"],
+            num_results=3
+        ),
+        VectorSearchRetriever(
+            index_name="gtm.vectors.battlecards",
+            columns=["competitor", "use_case", "win_themes", "objection_handlers"],
+            num_results=2
+        ),
+        UCFunctionTool("gtm.tools.calculate_deal_health"),
+        UCFunctionTool("gtm.tools.get_account_signals"),
+    ],
+    system_prompt=SYSTEM_PROMPT
+)
+
+# Test query
+result = agent.predict({
+    "messages": [{
+        "role": "user",
+        "content": "What's the deal health on opportunity OPP-4821 (Acme Corp) and draft a follow-up email for tomorrow's QBR?"
+    }]
+})
+print(result["messages"][-1]["content"])</code></pre>
+      </div>
+      <div class="output-tag">✓ Output: Working single-agent prototype with validated retrieval and tool calls</div>
+    </div>
+  </section>
+
+  <!-- PHASE 2 -->
+  <section id="phase2">
+    <div class="phase-card">
+      <div class="phase-header">
+        <div class="phase-icon" style="background:rgba(23,200,160,.15)">📚</div>
+        <div class="phase-meta">
+          <h2><span class="phase-num" style="border-color:var(--teal);color:var(--teal)">2</span> Knowledge layer via Knowledge Assistant</h2>
+          <p>Build the sales enablement Q&A layer — battlecards, plays, product docs — with a fully managed RAG pipeline. Sales enablement managers iterate quality directly, no ML engineers required.</p>
+        </div>
+      </div>
+
+      <div class="callout callout-tip">
+        <div class="callout-tag">Knowledge Assistant</div>
+        <p>Point Knowledge Assistant at your Confluence sales enablement space and Google Drive battlecard folder. Your competitive intelligence team iterates quality via natural language: <em>"The Salesforce objection handler should mention our native CDP integration"</em> — no re-indexing or prompt engineering needed.</p>
+      </div>
+
+      <h3>Configuring the knowledge base programmatically</h3>
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">04_knowledge_assistant.py</span></div>
+        <pre><code class="language-python">from databricks.knowledge_assistant import KnowledgeAssistant
+
+# Create a managed knowledge assistant for GTM content
+ka = KnowledgeAssistant.create(
+    name="gtm-sales-enablement",
+    description="GTM battlecards, product docs, sales plays, and competitive intel",
+    catalog="gtm",
+    schema="knowledge"
+)
+
+# Register document sources
+ka.add_source(
+    source_type="delta_table",
+    table="gtm.enablement.battlecards",
+    document_column="content",
+    metadata_columns=["competitor", "use_case", "last_updated"]
+)
+
+ka.add_source(
+    source_type="delta_table",
+    table="gtm.enablement.sales_plays",
+    document_column="play_content",
+    metadata_columns=["industry", "deal_stage", "use_case"]
+)
+
+ka.add_source(
+    source_type="delta_table",
+    table="gtm.enablement.product_releases",
+    document_column="release_notes",
+    metadata_columns=["version", "release_date", "feature_area"]
+)
+
+# SME feedback loop — product marketing improves retrieval quality
+# No code needed for ongoing iterations: they use the KA review UI
+ka.enable_feedback_loop(
+    reviewers=["product-marketing@company.com", "competitive-intel@company.com"],
+    feedback_threshold=0.75  # Auto-accept improvements above 75% quality score
+)
+
+print(f"Knowledge Assistant endpoint: {ka.endpoint_url}")
+print(f"Vector index: {ka.vector_index_name}")</code></pre>
+      </div>
+      <div class="output-tag">✓ Output: Managed enablement knowledge base with SME-driven quality loop</div>
+    </div>
+  </section>
+
+  <!-- PHASE 3 -->
+  <section id="phase3">
+    <div class="phase-card">
+      <div class="phase-header">
+        <div class="phase-icon" style="background:rgba(75,156,245,.15)">⚡</div>
+        <div class="phase-meta">
+          <h2><span class="phase-num" style="border-color:var(--blue);color:var(--blue)">3</span> Optimize with Agent Bricks</h2>
+          <p>Auto-generate task-specific evaluations, create synthetic deal scenarios, and run optimization across models and prompts to hit your quality/cost SLA.</p>
+        </div>
+      </div>
+
+      <h3>Configure Agent Bricks for outreach quality</h3>
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">05_agent_bricks.py</span></div>
+        <pre><code class="language-python">from databricks.agent_bricks import AgentBricks
+
+# Agent Bricks reads your enterprise data and auto-generates:
+# 1. Task-specific LLM judges (personalization, groundedness, tone)
+# 2. Synthetic deal scenarios from your historical CRM data
+# 3. Optimization across model × prompt × retrieval configurations
+
+optimizer = AgentBricks.configure(
+    task_description="""
+        Given an account's CRM data, Gong transcript history, product usage signals,
+        and a specific opportunity context, generate a personalized outreach email
+        for the AE to review and send. The email should:
+        - Reference a specific insight from the last Gong call by name
+        - Connect product usage patterns to a business outcome the champion cares about
+        - Include one relevant proof point from a similar customer in the same industry
+        - Have a clear single CTA relevant to the current deal stage
+    """,
+    data_connection={
+        "catalog": "gtm",
+        "tables": ["accounts", "opportunities", "outreach_log"],
+        "vector_indexes": ["gtm.vectors.call_transcripts", "gtm.vectors.deal_stories"]
+    },
+    optimization_objectives=["personalization_quality", "groundedness", "cost_per_call"],
+    target_quality_score=0.85,
+    max_cost_per_1k_calls_usd=2.50
+)
+
+# Run the optimization — Agent Bricks handles everything
+results = optimizer.run(
+    base_agent=agent,               # Your Phase 1 prototype
+    num_synthetic_examples=500,     # Generated from your historical deal data
+    optimization_budget_hours=4     # Time cap for the grid search
+)
+
+# Review iterations and pick the quality/cost tradeoff
+results.show_pareto_front()
+
+# Select the best configuration
+best_agent = results.get_best(
+    constraint="cost_per_1k_calls <= 2.00",
+    optimize_for="personalization_quality"
+)
+print(f"Best model: {best_agent.config.model}")
+print(f"Quality score: {best_agent.metrics.personalization_quality:.2f}")
+print(f"Cost per 1k calls: ${best_agent.metrics.cost_per_1k_calls:.2f}")</code></pre>
+      </div>
+      <div class="output-tag">✓ Output: Optimized agent configuration at target quality/cost SLA</div>
+    </div>
+  </section>
+
+  <!-- PHASE 4 -->
+  <section id="phase4">
+    <div class="phase-card">
+      <div class="phase-header">
+        <div class="phase-icon" style="background:rgba(240,165,48,.15)">🏗️</div>
+        <div class="phase-meta">
+          <h2><span class="phase-num" style="border-color:var(--amber);color:var(--amber)">4</span> Build with Genie Code + Agent Framework</h2>
+          <p>Graduate from single-agent to a production multi-agent system. Genie Code writes and maintains the LangGraph orchestration, Lakeflow ingestion pipelines, and CRM sync jobs.</p>
+        </div>
+      </div>
+
+      <div class="callout callout-warn">
+        <div class="callout-tag">Genie Code</div>
+        <p>Prompt Genie Code: <em>"Build a LangGraph multi-agent pipeline with a Supervisor, Research Agent, Scoring Agent, and Outreach Agent. Wire in Salesforce MCP for live CRM reads. The pipeline should run on new opportunity creation and on daily schedule."</em> Genie Code plans the architecture, writes the code, builds the Lakeflow pipeline, and monitors it in production.</p>
+      </div>
+
+      <h3>Multi-agent LangGraph orchestration</h3>
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">06_multi_agent.py</span></div>
+        <pre><code class="language-python">from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolNode
+from databricks.agents import create_agent_executor
+from typing import TypedDict, Annotated
+import operator
+
+# ── Shared state across agents ──────────────────────────────────────
+class DealState(TypedDict):
+    opp_id: str
+    account_id: str
+    messages: Annotated[list, operator.add]
+    deal_health: dict
+    account_signals: dict
+    retrieved_transcripts: list
+    retrieved_battlecards: list
+    outreach_draft: str
+    risk_flags: list
+    ae_id: str
+
+# ── Sub-agents ───────────────────────────────────────────────────────
+research_agent = create_agent_executor(
+    model="databricks/claude-3-5-sonnet",
+    tools=[
+        UCFunctionTool("gtm.tools.get_account_signals"),
+        VectorSearchRetriever("gtm.vectors.call_transcripts", num_results=4),
+    ],
+    system_prompt="Research the account. Retrieve the last 4 call transcripts and all account signals. Return a structured brief."
+)
+
+scoring_agent = create_agent_executor(
+    model="databricks/gtm-deal-scorer-llama31-70b",  # Fine-tuned via Mosaic AI
+    tools=[UCFunctionTool("gtm.tools.calculate_deal_health")],
+    system_prompt="Score the deal health 0-100. Identify the top 3 risk flags with specific evidence from the research brief."
+)
+
+outreach_agent = create_agent_executor(
+    model="databricks/claude-3-5-sonnet",
+    tools=[
+        VectorSearchRetriever("gtm.vectors.battlecards", num_results=2),
+        VectorSearchRetriever("gtm.vectors.deal_stories", num_results=1),
+    ],
+    system_prompt="Draft a personalized outreach email. Ground every sentence in a specific signal from the research brief. One clear CTA."
+)
+
+# ── LangGraph orchestration ──────────────────────────────────────────
+workflow = StateGraph(DealState)
+
+workflow.add_node("research",  research_agent)
+workflow.add_node("scoring",   scoring_agent)
+workflow.add_node("outreach",  outreach_agent)
+
+workflow.set_entry_point("research")
+workflow.add_edge("research", "scoring")
+workflow.add_edge("scoring",  "outreach")
+workflow.add_edge("outreach", END)
+
+# Compile with MLflow autologging — all traces captured automatically
+import mlflow
+mlflow.langchain.autolog()
+
+gtm_agent = workflow.compile()
+
+# ── Lakeflow trigger pipeline (built by Genie Code) ──────────────────
+# Runs on new opportunity creation OR daily at 6am for each AE's pipeline
+# @lakeflow.pipeline("gtm-deal-intelligence", schedule="0 6 * * *")
+# def daily_pipeline():
+#     new_opps = spark.table("gtm.opportunities").filter("updated_at > current_date - 1")
+#     for row in new_opps.collect():
+#         result = gtm_agent.invoke({"opp_id": row.opp_id, "account_id": row.account_id})
+#         spark.createDataFrame([result]).write.mode("append").saveAsTable("gtm.outreach_log")</code></pre>
+      </div>
+
+      <h3>Salesforce MCP integration</h3>
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">07_mcp_tools.py</span></div>
+        <pre><code class="language-python">from databricks.agents.mcp import MCPServerConnection
+
+# Connect to Salesforce via managed MCP — no credentials in code
+sf_mcp = MCPServerConnection(
+    name="salesforce-crm",
+    server_url="https://salesforce.mcp.databricks.com/sse",
+    auth_type="oauth",  # Uses Unity Catalog credential store
+    allowed_tools=[
+        "salesforce__get_opportunity",
+        "salesforce__update_next_step",
+        "salesforce__add_activity",
+        "salesforce__get_contacts",
+    ]
+)
+
+gong_mcp = MCPServerConnection(
+    name="gong-calls",
+    server_url="https://gong.mcp.databricks.com/sse",
+    auth_type="api_key",
+    allowed_tools=[
+        "gong__get_call_transcript",
+        "gong__get_account_calls",
+        "gong__get_deal_signals",
+    ]
+)
+
+# Register MCP tools in the research agent
+research_agent_with_mcp = create_agent_executor(
+    model="databricks/claude-3-5-sonnet",
+    tools=[
+        sf_mcp.get_tool("salesforce__get_opportunity"),
+        sf_mcp.get_tool("salesforce__get_contacts"),
+        gong_mcp.get_tool("gong__get_account_calls"),
+        UCFunctionTool("gtm.tools.get_account_signals"),
+        VectorSearchRetriever("gtm.vectors.call_transcripts", num_results=3),
+    ],
+    system_prompt="Research the account using live CRM data and Gong calls. Return a structured brief."
+)</code></pre>
+      </div>
+      <div class="output-tag">✓ Output: Production LangGraph multi-agent with Salesforce + Gong MCP, Lakeflow daily pipeline</div>
+    </div>
+  </section>
+
+  <!-- PHASE 5 -->
+  <section id="phase5">
+    <div class="phase-card">
+      <div class="phase-header">
+        <div class="phase-icon" style="background:rgba(232,93,46,.15)">🛡️</div>
+        <div class="phase-meta">
+          <h2><span class="phase-num" style="border-color:var(--coral);color:var(--coral)">5</span> Govern &amp; secure</h2>
+          <p>Apply Unity Catalog row-level security so reps only see their territory, mask PII fields, and configure Lakewatch to detect prompt injection and data exfiltration.</p>
+        </div>
+      </div>
+
+      <h3>Unity Catalog — territory-based row security</h3>
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">SQL</span><span class="code-file">08_uc_governance.sql</span></div>
+        <pre><code class="language-sql">-- Row-level security: AEs only see their territory's accounts
+CREATE ROW FILTER gtm.security.territory_filter
+  ON gtm.opportunities (territory STRING)
+  AS CURRENT_USER() = ae_owner
+  OR IS_MEMBER('sales-leadership')
+  OR IS_MEMBER('revenue-operations');
+
+ALTER TABLE gtm.opportunities
+  ADD ROW FILTER gtm.security.territory_filter ON (territory);
+
+-- Column masking: hide personal email for non-managers
+CREATE COLUMN MASK gtm.security.mask_personal_email
+  ON gtm.contacts (personal_email STRING)
+  AS CASE
+    WHEN IS_MEMBER('sales-leadership') THEN personal_email
+    ELSE CONCAT(LEFT(personal_email, 2), '***@***.***')
+  END;
+
+ALTER TABLE gtm.contacts
+  ADD COLUMN MASK gtm.security.mask_personal_email ON (personal_email);
+
+-- Audit: capture every agent read of opportunity data
+CREATE TABLE gtm.audit.agent_data_access (
+  trace_id      VARCHAR,
+  ae_id         VARCHAR,
+  opp_id        VARCHAR,
+  tool_called   VARCHAR,
+  accessed_at   TIMESTAMP DEFAULT NOW()
+);
+
+-- Lineage is automatic — Unity Catalog tracks which agent call
+-- read which rows of which table, for every invocation</code></pre>
+      </div>
+
+      <h3>Lakewatch — agent security monitoring</h3>
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">09_lakewatch.py</span></div>
+        <pre><code class="language-python">from databricks.lakewatch import DetectionRule, Severity
+
+# Rule 1: Detect contact data exfiltration via agent output
+DetectionRule.create(
+    name="gtm_contact_pii_in_output",
+    description="Alert when agent output contains PII patterns beyond the requesting AE's accounts",
+    severity=Severity.HIGH,
+    query="""
+        SELECT trace_id, ae_id, output_text, account_ids_accessed
+        FROM gtm.mlflow_traces
+        WHERE trace_timestamp > CURRENT_TIMESTAMP - INTERVAL 1 HOUR
+          AND ARRAY_SIZE(account_ids_accessed) > 20  -- Unusual breadth
+          AND output_text RLIKE '\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b'
+    """,
+    alert_channel="slack://security-alerts"
+)
+
+# Rule 2: Detect prompt injection attempts in user inputs
+DetectionRule.create(
+    name="gtm_prompt_injection",
+    description="Detect prompt injection patterns in AE inputs to the agent",
+    severity=Severity.CRITICAL,
+    query="""
+        SELECT trace_id, ae_id, user_input
+        FROM gtm.mlflow_traces
+        WHERE trace_timestamp > CURRENT_TIMESTAMP - INTERVAL 15 MINUTES
+          AND (
+            LOWER(user_input) LIKE '%ignore previous instructions%'
+            OR LOWER(user_input) LIKE '%system prompt%'
+            OR LOWER(user_input) LIKE '%reveal your instructions%'
+            OR LOWER(user_input) LIKE '%act as%'
+          )
+    """,
+    alert_channel="pagerduty://security-oncall",
+    auto_block=True  # Suspend the trace immediately
+)
+
+# Rule 3: Unusual outreach volume spike (potential abuse)
+DetectionRule.create(
+    name="gtm_outreach_volume_spike",
+    description="Alert when a single AE generates 10x their normal daily outreach volume",
+    severity=Severity.MEDIUM,
+    query="""
+        WITH daily_avg AS (
+            SELECT ae_id, AVG(daily_count) AS avg_count
+            FROM gtm.outreach_log_daily_agg
+            WHERE log_date > CURRENT_DATE - 30
+            GROUP BY ae_id
+        )
+        SELECT t.ae_id, t.today_count, d.avg_count
+        FROM gtm.outreach_log_today t
+        JOIN daily_avg d ON t.ae_id = d.ae_id
+        WHERE t.today_count > d.avg_count * 10
+    """,
+    alert_channel="slack://revenue-ops"
+)</code></pre>
+      </div>
+      <div class="output-tag">✓ Output: Territory-enforced data access · PII masking · 3 Lakewatch detection rules</div>
+    </div>
+  </section>
+
+  <!-- PHASE 6 -->
+  <section id="phase6">
+    <div class="phase-card">
+      <div class="phase-header">
+        <div class="phase-icon" style="background:rgba(94,189,58,.15)">🚀</div>
+        <div class="phase-meta">
+          <h2><span class="phase-num" style="border-color:var(--green);color:var(--green)">6</span> Evaluate &amp; deploy</h2>
+          <p>Run the Agent Evaluation suite with AI judges, get stakeholder sign-off via the human review UI, then deploy to Databricks Apps with the Quotient AI RL loop for continuous improvement.</p>
+        </div>
+      </div>
+
+      <h3>MLflow — evaluation suite with AI judges</h3>
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">10_evaluate.py</span></div>
+        <pre><code class="language-python">import mlflow
+from databricks.agents import evaluate
+
+# Evaluation dataset: 80 real deal scenarios with AE-rated ground truth
+eval_data = spark.table("gtm.eval.golden_dataset").toPandas()
+# Columns: opp_id, question, expected_health_score, expected_risk_flags,
+#          expected_outreach_themes, ae_rating (1-5)
+
+mlflow.set_experiment("/gtm/deal-intelligence-eval")
+
+with mlflow.start_run(run_name="v1.2-release-candidate"):
+
+    results = evaluate(
+        model=gtm_agent,
+        data=eval_data,
+        model_type="databricks-agent",
+        evaluators=["databricks"],
+        evaluator_config={
+            "databricks": {
+                "metrics": [
+                    "groundedness",           # Is deal health grounded in retrieved data?
+                    "relevance",              # Is outreach relevant to the deal context?
+                    "retrieval_precision",    # Are retrieved transcripts actually useful?
+                    "personalization_quality",# Custom judge: specific signals used?
+                    "safety",                 # No hallucinated facts or PII leakage
+                ],
+                "custom_judges": [
+                    {
+                        "name": "personalization_quality",
+                        "judge_prompt": """
+                            Rate this outreach email 1-5 on personalization quality.
+                            5 = References a specific named insight from a recent call,
+                                connects to a stated business priority, includes a
+                                proof point from a comparable customer.
+                            1 = Generic email that could apply to any prospect.
+                            Email: {output}
+                            Account context: {retrieved_context}
+                        """,
+                        "model": "databricks/claude-3-5-sonnet"
+                    }
+                ]
+            }
+        }
+    )
+
+    print(f"Groundedness:            {results.metrics['groundedness/mean']:.2f}")
+    print(f"Relevance:               {results.metrics['relevance/mean']:.2f}")
+    print(f"Personalization quality: {results.metrics['personalization_quality/mean']:.2f}")
+    print(f"Safety pass rate:        {results.metrics['safety/mean']:.2%}")
+
+    # Log the optimized agent config as the new champion
+    if results.metrics['personalization_quality/mean'] >= 0.85:
+        mlflow.log_param("promoted_to_staging", True)
+        mlflow.pyfunc.log_model("gtm_agent", python_model=gtm_agent)</code></pre>
+      </div>
+
+      <h3>Deploy to Databricks Apps for AEs</h3>
+      <div class="code-wrap">
+        <div class="code-header"><span class="code-lang">Python</span><span class="code-file">11_deploy.py</span></div>
+        <pre><code class="language-python">from databricks.sdk import WorkspaceClient
+from databricks.agents import deploy
+
+w = WorkspaceClient()
+
+# Deploy the evaluated agent to a REST endpoint
+deployment = deploy(
+    model_name="gtm.agents.deal-intelligence",
+    version=mlflow.register_model(
+        model_uri=f"runs:/{run_id}/gtm_agent",
+        name="gtm.agents.deal-intelligence"
+    ).version,
+    scale_to_zero=True,           # Serverless GPU — cost-efficient off-hours
+    enable_feedback_ui=True,      # AEs can rate responses → feeds Quotient RL loop
+    traffic_config={
+        "canary_percent": 10,     # 10% of AEs get v1.2 first
+        "rollout_hours": 48       # Full rollout over 48h if no regressions
+    }
+)
+
+print(f"Endpoint: {deployment.endpoint_url}")
+print(f"Review UI: {deployment.review_app_url}")
+
+# ── Quotient AI continuous improvement loop ───────────────────────────
+# Automatically active post-deployment:
+# 1. AE feedback (thumbs up/down on outreach drafts) flows to Quotient
+# 2. Quotient monitors answer quality, detects regressions, pins failures
+# 3. Reinforcement learning loop retrains on accepted/rejected outreach
+# 4. Improved agent versions staged automatically for evaluation
+# 5. Alerts fired to RevOps if quality drops > 5% week-over-week
+
+# ── Databricks Apps (AE-facing UI) ───────────────────────────────────
+app = w.apps.create(
+    name="gtm-deal-intelligence",
+    description="Deal health, competitive intel, and personalized outreach for AEs",
+    resources=[{"name": "deal-intelligence-endpoint", "serving_endpoint": {"name": deployment.endpoint_name}}]
+)
+print(f"AE App URL: {app.url}")</code></pre>
+      </div>
+      <div class="output-tag">✓ Output: Deployed agent endpoint · AE-facing Databricks App · Quotient RL improvement loop active</div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- TESTING STRATEGY -->
+  <section id="testing">
+    <h2>Testing strategy</h2>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:8px;">
+      <div class="callout callout-info">
+        <div class="callout-tag">Unit tests — tool level</div>
+        <p>Assert <code>calculate_deal_health()</code> returns correct risk flags for known fixtures. Test Vector Search returns ≥1 result for 10 seed queries. Run in CI on every commit.</p>
+      </div>
+      <div class="callout callout-tip">
+        <div class="callout-tag">Integration tests — agent level</div>
+        <p>30 golden scenarios with AE-rated expected outputs. Assert personalization score ≥ 0.80 and groundedness ≥ 0.90 before any promotion to staging.</p>
+      </div>
+      <div class="callout callout-warn">
+        <div class="callout-tag">Shadow mode</div>
+        <p>Run v1.2 alongside v1.1 for 2 weeks on 20% of traffic without surfacing results to AEs. Compare win rates on deals where AEs used agent outreach vs manual.</p>
+      </div>
+      <div class="callout callout-info">
+        <div class="callout-tag">Regression gate (Quotient AI)</div>
+        <p>Automatic weekly regression check. If personalization quality drops &gt; 5% or groundedness &lt; 0.85, block promotion and page RevOps.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- INFRA CHECKLIST -->
+  <section id="infra">
+    <h2>Infrastructure checklist</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:32px;">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);margin-bottom:10px;">Compute</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.8;">
+          ☐ Serverless SQL (Lakebase queries)<br>
+          ☐ Serverless GPU (Model Serving)<br>
+          ☐ Vector Search endpoint provisioned<br>
+          ☐ Lakeflow pipeline cluster configured<br>
+          ☐ Databricks Apps workspace enabled
+        </div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);margin-bottom:10px;">Auth &amp; Secrets</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.8;">
+          ☐ Salesforce OAuth registered in UC credential store<br>
+          ☐ Gong API key stored in Databricks Secrets<br>
+          ☐ AE SSO mapped to Unity Catalog identities<br>
+          ☐ Lakewatch alert channels configured<br>
+          ☐ MLflow experiment permissions set
+        </div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);margin-bottom:10px;">Data</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.8;">
+          ☐ CRM historical backfill (≥2 years)<br>
+          ☐ Gong transcript delta sync active<br>
+          ☐ Product usage pipeline (DAU, feature flags)<br>
+          ☐ Vector indexes fully built and validated<br>
+          ☐ Evaluation golden dataset curated (≥80 examples)
+        </div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);margin-bottom:10px;">Governance</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.8;">
+          ☐ Row filters on opportunities + contacts<br>
+          ☐ Column masks on PII fields<br>
+          ☐ LLM Gateway per-team token budgets set<br>
+          ☐ Lakewatch rules deployed + tested<br>
+          ☐ Audit table retention policy configured
+        </div>
+      </div>
+    </div>
+    <p style="text-align:center;font-size:12px;color:var(--faint);">Databricks GTM Deal Intelligence Agent · Implementation Guide · Built on the full Databricks Agentic Stack</p>
+  </section>
+
+</main>
+</div>
+
+<script>hljs.highlightAll();</script>
+</body>
+</html>
