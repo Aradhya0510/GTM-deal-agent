@@ -4,22 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-GTM Deal Intelligence Agent — a LangGraph tool-calling agent on Databricks that helps B2B SaaS account executives with deal scoring, account research, competitive intel, and personalized outreach. Showcases 13 Databricks capabilities in a single demo app.
+GTM Deal Intelligence Agent — a LangGraph tool-calling agent on Databricks that helps B2B SaaS account executives with deal scoring, account research, competitive intel, and personalized outreach. Showcases 13+ Databricks capabilities in a single demo app.
 
 **Deployed on:** `e2-demo-west.cloud.databricks.com` | Catalog: `users` | Schema: `aradhya_chouhan`
 
 ## Architecture
 
-**Production agent** (`deployment/agent.py`): Single LangGraph graph with a tool-calling loop + two-tier memory.
+**Production agent** (`deployment/agent.py`): Single LangGraph graph with a tool-calling loop + Lakebase memory.
 
 ```
-User query → load long-term memory (SQL API) → agent node (Claude Sonnet 4.6) → tool calls? → yes → tools node → back to agent
-                                                                                → no  → END
-Short-term: App sends full conversation history (client-side replay) + MemorySaver (in-process)
-Long-term:  Delta memory tables → SQL Statement Execution API → system prompt prefix
+User query → guardrail check → agent node (Claude Sonnet 4.6) → tool calls? → yes → tools node → back to agent
+                                                                              → no  → END
+Short-term: Lakebase CheckpointSaver (cross-replica) with MemorySaver fallback + client-side replay
+Long-term:  recall_lakebase_memory tool → Delta memory tables via SQL Statement Execution API
+Security:   Pre-request injection detection + post-response PII scan → audit_agent_access table
 ```
 
-5 tools available:
+7 tools available:
+- `recall_lakebase_memory` (Lakebase) — loads AE preferences, account context, deal decisions from Delta memory tables
+- `store_lakebase_memory` (Lakebase) — writes new facts/preferences to memory tables in real-time
 - `calculate_deal_health` (UC TABLE Function) — scores deals 0-100 with risk flags
 - `get_account_signals` (UC TABLE Function) — full account 360 (contacts, opps, ARR)
 - `gtm_transcripts_idx` (Vector Search) — 7 Gong call transcripts
@@ -31,18 +34,41 @@ Long-term:  Delta memory tables → SQL Statement Execution API → system promp
 **Short-term** (multi-turn within a session):
 - App sends **full conversation history** as `input` (not just the latest message) — client-side replay
 - `thread_id` tracked per session in `st.session_state` and passed via `custom_inputs`
-- `MemorySaver` (in-process) provides additional checkpointing within a single replica
+- Lakebase `CheckpointSaver` (from `databricks.agents.lakebase`) for cross-replica persistence; falls back to `MemorySaver` if not available
 - Enables follow-ups: "make it shorter", "try a different angle"
 
 **Long-term** (cross-session persistence):
-- At session start: `_load_memory_prefix()` queries 3 Delta tables via **SQL Statement Execution API** (`warehouse_id: 75fd8278393d07eb`) and prepends to system prompt
-- At session end: `_extract_and_store_memories()` runs haiku extraction agent and writes back via SQL API
+- Agent calls `recall_lakebase_memory(ae_id, account_id)` as its **first tool call** on every query — this is a visible LangGraph tool that shows up in tool call cards
+- Queries 3 Delta tables via SQL Statement Execution API (`warehouse_id: 75fd8278393d07eb`)
+- Returns structured JSON with preferences, account context, and deal decisions
+- Agent can also call `store_lakebase_memory()` to write new facts during conversation
+- At session end: `_extract_and_store_memories()` runs haiku extraction agent for batch writes
 - Tables: `users.aradhya_chouhan.memory_ae_profiles`, `memory_account_context`, `memory_deal_decisions`
-- Memory extraction triggered via `save_memories: true` in `custom_inputs`
 
-**Why not Lakebase?** The `databricks.sdk.WorkspaceClient` on e2-demo-west doesn't expose `.lakebase` — SDK is too old. Memory tables are Delta tables queried via the SQL Statement Execution API instead.
+**Key design decision**: Memory is a visible tool call (not a hidden pre-processing step) so it appears in the demo UI alongside UC Functions and Vector Search. The system prompt instructs "ALWAYS call recall_lakebase_memory FIRST".
 
-**Prerequisite**: Memory Delta tables created via `deployment/lakebase_memory_setup.py` notebook + demo data seeded.
+### Security Architecture
+
+**Inline guardrails** in `deployment/agent.py`:
+- **Pre-request**: Regex-based prompt injection detection (12 patterns). Blocks request, returns safety message, logs to `audit_agent_access`.
+- **Post-response**: PII leakage scan (email, phone, SSN). Logs to audit table.
+
+**Lakewatch rules** in `setup/06_lakewatch_rules.py`:
+- 4 SQL alert queries: prompt injection, PII in output, broad account scraping, outreach volume spike
+
+**Audit table**: `audit_agent_access` (Delta) — logs security events and tool access. Created by `setup/07_audit_tables.py`.
+
+### App Architecture (v2 Command Center)
+
+**`app/app.py`** — 5-tab Streamlit app with [HELIX] industrial design system:
+
+1. **[AGENT]** — Chat with inline tool-call cards (expandable I/O), Lakebase memory banner, latency, accept/reject feedback
+2. **[ARCHITECTURE]** — 6-layer stack diagram, asset directory with deep links, 10-step request lifecycle
+3. **[OBSERVE]** — Metrics cards, tool usage bar chart, recent calls table, evaluation scorecard
+4. **[MEMORY]** — AE profile card, account context with confidence bars, decision log, prompt preview
+5. **[SECURITY]** — Lakewatch rule cards, `[TEST INJECTION]` button, governance table, audit log
+
+Design: Near-black backgrounds (#0A0A0A), JetBrains Mono, `+` crosshair corners, bracket notation `[LABELS]`, orange accent (#FF6200), 2px border-radius max.
 
 ### Critical: Correct SDK Imports
 
@@ -50,10 +76,18 @@ Long-term:  Delta memory tables → SQL Statement Execution API → system promp
 # CORRECT — tools come from databricks_langchain
 from databricks_langchain import ChatDatabricks, UCFunctionToolkit, VectorSearchRetrieverTool
 
+# CORRECT — custom LangGraph tools via langchain_core
+from langchain_core.tools import tool
+
 # CORRECT — ResponsesAgent comes from mlflow.pyfunc
 from mlflow.pyfunc import ResponsesAgent
 from mlflow.types.responses import ResponsesAgentRequest, ResponsesAgentResponse, ResponsesAgentStreamEvent
-from mlflow.types.responses import output_to_responses_items_stream, to_chat_completions_input
+
+# CORRECT — Lakebase CheckpointSaver (with fallback)
+try:
+    from databricks.agents.lakebase import CheckpointSaver
+except ImportError:
+    from langgraph.checkpoint.memory import MemorySaver
 
 # CORRECT — resources for auth passthrough in log_model()
 from mlflow.models.resources import DatabricksServingEndpoint, DatabricksFunction, DatabricksVectorSearchIndex
@@ -61,22 +95,20 @@ from mlflow.models.resources import DatabricksServingEndpoint, DatabricksFunctio
 # WRONG — these do NOT exist:
 # from databricks.agents.tools import VectorSearchRetriever, UCFunctionTool  # NO!
 # from databricks.agents import ResponsesAgent, ChatAgent  # NO!
-# from databricks.agents import create_agent_executor  # NO!
 ```
 
-`databricks-agents` (v1.9.4) is a **deployment-only** SDK — it provides `deploy()`, `get_deployments()`, etc. Agent building uses `mlflow` + `databricks_langchain`. Exception: `databricks.agents.lakebase.CheckpointSaver` is valid for LangGraph checkpointing.
+`databricks-agents` is a **deployment-only** SDK — it provides `deploy()`, `get_deployments()`, etc. Agent building uses `mlflow` + `databricks_langchain`. Exception: `databricks.agents.lakebase.CheckpointSaver` is valid for LangGraph checkpointing.
 
 ### Key Files
 
-- **`deployment/agent.py`** — Standalone agent definition + `mlflow.models.set_model()`. This is what Model Serving loads. Includes inline memory loading (SQL API) / extraction (haiku). Must NOT contain any logging/deployment code.
+- **`deployment/agent.py`** — Standalone agent definition with 7 tools (2 Lakebase + 2 UC + 3 VS), inline guardrails, and `mlflow.models.set_model()`. This is what Model Serving loads. Must NOT contain any logging/deployment code.
 - **`deployment/log_and_deploy_notebook.py`** — Databricks notebook that calls `mlflow.pyfunc.log_model(python_model="agent.py")` and `agents.deploy()`. Separate from agent.py to avoid infinite recursion.
 - **`deployment/lakebase_memory_setup.py`** — Notebook that creates Delta memory tables and seeds demo data. Run on workspace as a serverless job.
-- **`app/app.py`** — Streamlit app with full conversation replay, thread_id tracking, AE selector, and Lakebase Memory badge.
-- **`src/servicenow_gtm_agent/graph.py`** — Reusable graph builder for local dev (accepts checkpointer + memory_prefix).
-- **`src/servicenow_gtm_agent/memory/`** — Two-tier memory layer (reference implementation): `short_term.py`, `long_term.py`, `prompt_builder.py`.
-- **`src/servicenow_gtm_agent/agents/memory_extractor.py`** — Haiku-based extraction (ChatDatabricks, no tools).
-- **`src/servicenow_gtm_agent/tools/`** — Tool wrappers using `databricks_langchain`.
-- **`configs/e2_demo_west.yaml`** — Workspace-specific config (catalog, schema, endpoints, index names).
+- **`app/app.py`** — v2 Command Center: 5-tab Streamlit app with [HELIX] industrial design, tool call visualization, memory display, security dashboard, architecture blueprint.
+- **`setup/07_audit_tables.py`** — Creates `audit_agent_access` Delta table for security/access logging.
+- **`setup/06_lakewatch_rules.py`** — 4 Lakewatch SQL alert rule definitions.
+- **`src/servicenow_gtm_agent/`** — Reference implementation for local dev (graph, memory, tools).
+- **`configs/e2_demo_west.yaml`** — Workspace-specific config.
 
 ## Hard-Won Deployment Learnings
 
@@ -99,15 +131,7 @@ Delta-sync indexes on NEWLY CREATED endpoints can take 20-30+ minutes ("pending 
 `mlflow.langchain.autolog()` creates an active run. A subsequent `mlflow.start_run()` raises "Run with UUID ... is already active". Fix: call `mlflow.end_run()` before `start_run()`, or don't use autolog in the logging notebook.
 
 ### 7. Resources for auth passthrough
-When logging with `mlflow.pyfunc.log_model()`, declare all Databricks resources so Model Serving can authenticate:
-```python
-resources = [DatabricksServingEndpoint(endpoint_name=LLM_ENDPOINT)]
-for tool in tools:
-    if isinstance(tool, UnityCatalogTool):
-        resources.append(DatabricksFunction(function_name=tool.uc_function_name))
-    elif isinstance(tool, VectorSearchRetrieverTool):
-        resources.extend(tool.resources)  # auto-includes VS index + embedding endpoint
-```
+When logging with `mlflow.pyfunc.log_model()`, declare all Databricks resources so Model Serving can authenticate. Include both LLM endpoints (primary + haiku for memory extraction). Custom Python tools (recall/store_lakebase_memory) use SQL Statement Execution API which authenticates via the serving endpoint's service principal — no extra resource declarations needed.
 
 ### 8. Source tables need CDF for delta-sync indexes
 `TBLPROPERTIES (delta.enableChangeDataFeed = true)` must be set on source tables BEFORE creating delta-sync Vector Search indexes.
@@ -121,14 +145,38 @@ The `env:` section with `value_from: workspace` / `value_from: token` causes `[E
 ### 11. Agent endpoint timeout: use 300s for complex queries
 Multi-tool queries (5+ tool calls) can take 2-3 minutes. The default SDK timeout (60s) causes timeouts. Set `Config(http_timeout_seconds=300)` when calling the agent endpoint from the app.
 
-### 12. Lakebase SDK not available on e2-demo-west — use Delta + SQL API
-`WorkspaceClient().lakebase` doesn't exist (SDK too old). Workaround: store memory in Delta tables and query via `w.statement_execution.execute_statement(warehouse_id="75fd8278393d07eb")`. Works from Model Serving with auth passthrough.
+### 12. Lakebase SDK: w.lakebase not available, but CheckpointSaver works
+`WorkspaceClient().lakebase` doesn't exist on e2-demo-west (SDK v0.34.0 too old). However, `databricks.agents.lakebase.CheckpointSaver` IS available on the Model Serving runtime. Use it for session persistence, with `MemorySaver` as fallback. For data storage, use Delta tables via SQL Statement Execution API.
 
-### 13. MemorySaver doesn't persist across endpoint replicas
-`langgraph.checkpoint.memory.MemorySaver` is in-process only. Multi-turn breaks if requests hit different replicas. Fix: send full conversation history from the app (client-side replay) instead of relying on server-side checkpointing.
+### 13. Make memory a visible tool for demo impact
+Hidden pre-processing steps (like silently loading memory before the agent loop) don't show up in tool call cards. For demo impact, implement memory as actual LangGraph tools (`@tool` from `langchain_core.tools`) so they appear alongside UC Functions and Vector Search in the UI.
 
 ### 14. PySpark Row() with complex types fails on serverless
 `spark.createDataFrame([Row(...)])` with `ARRAY<STRING>` or `datetime` fields causes `CANNOT_DETERMINE_TYPE`. Fix: use SQL INSERT statements directly via `spark.sql("INSERT INTO ...")` instead of DataFrame writes.
+
+### 15. SQL notebooks fail on serverless job submission
+SQL-language notebooks uploaded via `--language SQL` fail on serverless compute with opaque "Workload failed" errors. Fix: wrap SQL in a Python notebook using `spark.sql("""...""")` instead.
+
+### 16. Databricks deep link URL format
+Use path-based URLs with `?o=` workspace ID parameter, NOT hash-based (`#/`) routing:
+```
+https://e2-demo-west.cloud.databricks.com/explore/data/{catalog}/{schema}/{table}?o=2556758628403379
+https://e2-demo-west.cloud.databricks.com/serving-endpoints/{name}/invocations?o=2556758628403379
+https://e2-demo-west.cloud.databricks.com/explore/data/models/{catalog}/{schema}/{model}?o=2556758628403379
+https://e2-demo-west.cloud.databricks.com/sql/warehouses/{id}?o=2556758628403379
+```
+
+### 17. ResponsesAgentStreamEvent items need `id` and `role` fields
+When manually constructing a `ResponsesAgentStreamEvent` (e.g., for a blocked/guardrail response), the `item` dict must include `id` and `role` fields or Model Serving will fail with a validation error (`item.id Field re...`). The LangGraph `output_to_responses_items_stream` helper adds these automatically, but hand-built items need them explicitly:
+```python
+blocked_item = {
+    "type": "message",
+    "id": f"msg_{uuid.uuid4().hex[:12]}",
+    "role": "assistant",
+    "content": [{"type": "output_text", "text": "Blocked."}],
+}
+yield ResponsesAgentStreamEvent(type="response.output_item.done", item=blocked_item)
+```
 
 ## Commands
 
@@ -151,6 +199,7 @@ Infrastructure in `setup/` — run as Databricks notebooks:
 6. `deployment/lakebase_memory_setup.py` — Delta memory tables + seed data (run as serverless job)
 7. `05_uc_governance.sql` — RLS + column masking
 8. `06_lakewatch_rules.py` — Security detection rules
+9. `setup/07_audit_tables.py` — Audit table for security events (run as serverless job)
 
 ## Deployment
 
@@ -202,17 +251,75 @@ App URL: `https://gtm-deal-intelligence-2556758628403379.aws.databricksapps.com`
 | Asset | Name |
 |---|---|
 | Tables | `users.aradhya_chouhan.gtm_accounts`, `gtm_contacts`, `gtm_opportunities`, `gtm_outreach_log`, `gtm_call_transcripts`, `gtm_battlecards`, `gtm_deal_stories` |
+| Audit Table | `users.aradhya_chouhan.audit_agent_access` |
 | VS Endpoint | `dbdemos_vs_endpoint` |
 | VS Indexes | `users.aradhya_chouhan.gtm_transcripts_idx`, `gtm_battlecards_idx`, `gtm_stories_idx` |
 | UC Functions | `users.aradhya_chouhan.calculate_deal_health`, `get_account_signals` |
 | MLflow Experiment | `/Users/aradhya.chouhan@databricks.com/gtm-deal-intelligence` |
 | Model | `users.aradhya_chouhan.gtm_deal_intelligence_agent` |
-| Serving Endpoint | `agents_users-aradhya_chouhan-gtm_deal_intelligence_agent` (v2 = memory-enabled) |
-| SQL Warehouse | `75fd8278393d07eb` ("Shared Endpoint") — used by agent for memory queries |
-| Memory Tables (Delta) | `users.aradhya_chouhan.memory_ae_profiles`, `memory_account_context`, `memory_deal_decisions` |
+| Serving Endpoint | `agents_users-aradhya_chouhan-gtm_deal_intelligence_agent` (v3 = Lakebase memory tools + guardrails) |
+| SQL Warehouse | `75fd8278393d07eb` ("Shared Endpoint") — used by agent for Lakebase memory queries |
+| Memory Tables (Delta/Lakebase) | `users.aradhya_chouhan.memory_ae_profiles`, `memory_account_context`, `memory_deal_decisions` |
 | Streamlit App | `gtm-deal-intelligence` — `https://gtm-deal-intelligence-2556758628403379.aws.databricksapps.com` |
+
+## Showcase App (ServiceNow Demo)
+
+**`showcase/`** — A separate 6-page Streamlit app branded for ServiceNow GTM AI team demo. Shares the same agent endpoint and Databricks assets as the main app but has its own design language (ServiceNow green #62D84E, "Powered by Databricks" co-branding).
+
+**Files (5 Python + 2 config):**
+- `app.py` (~490 lines) — Main entry, sidebar, navigation (st.radio horizontal), 6 page rendering
+- `backend.py` (~190 lines) — WorkspaceClient, SQL cache, query_agent(), streaming SSE consumer, MLflow stats fetcher
+- `data.py` (~220 lines) — 6 industry vertical data sets with ServiceNow competitors (BMC Helix, Zendesk, Atlassian, Salesforce Health Cloud, IBM Maximo, IFS, SAP)
+- `styles.py` (~250 lines) — All CSS: ServiceNow branding, X-Ray, DAG animation, streaming cursors
+- `components.py` (~115 lines) — render_xray(), render_dag(), render_streaming_tool_card()
+- `app.yaml` — Databricks Apps config with serving endpoint resource
+- `requirements.txt` — streamlit, databricks-sdk, requests
+
+**6 pages:**
+1. **Morning Briefing** — KPI strip + priority cards (single column, no fake reasoning panel)
+2. **Deal Room** — Compact header + wide chat (3:1 ratio) + memory/risk sidebar. Agent called in-place with tool cards revealed one-by-one (300ms delay). No st.rerun() after call.
+3. **Architecture** — CSS-animated DAG (nodes light up sequentially via @keyframes + animation-delay), "Run Test Query" button, Node Value Guide panel, request lifecycle, asset directory with deep links
+4. **Outreach Studio** — Email/LinkedIn/Call drafts (demo data per industry)
+5. **Pipeline** — Filterable deal table (demo data per industry)
+6. **Observatory** — Real MLflow experiment runs, session tool usage, Lakebase memory browser, Lakewatch audit log, workspace deep links
+
+**Deployed at:** `https://mission-control-2556758628403379.aws.databricksapps.com`
+**Workspace path:** `/Workspace/Users/aradhya.chouhan@databricks.com/mission-control/`
+**App name:** `mission-control`
+
+**Deployment:**
+```bash
+# Upload all files
+for f in app.py backend.py data.py styles.py components.py app.yaml requirements.txt; do
+  databricks --profile e2-demo-west workspace import \
+    /Workspace/Users/aradhya.chouhan@databricks.com/mission-control/$f \
+    --file showcase/$f --format AUTO --overwrite
+done
+
+# Deploy
+databricks --profile e2-demo-west apps deploy mission-control \
+  --source-code-path /Workspace/Users/aradhya.chouhan@databricks.com/mission-control
+```
+
+### Key Showcase App Learnings
+
+1. **Databricks Apps require app.yaml + requirements.txt** — without them, the runtime defaults to `python app.py` instead of `streamlit run app.py`, causing ScriptRunContext crashes.
+
+2. **@st.cache_data causes ScriptRunContext errors** at import time on Databricks Apps. Use a plain dict-based TTL cache instead.
+
+3. **st.tabs() cannot be programmatically switched** — use `st.radio(horizontal=True)` with session_state for page routing when you need to switch pages from button clicks.
+
+4. **Streamlit streaming is fundamentally limited** — `st.empty()` updates during streaming loops get wiped by `st.rerun()`. The reliable pattern: detect unprocessed user message → call agent in-place → render tool cards with `time.sleep()` delays → show text → store in session_state → do NOT call st.rerun() after.
+
+5. **CSS-only animation beats Streamlit re-rendering** — for the DAG "powertrain" effect, inject `@keyframes` with staggered `animation-delay` via `st.markdown(unsafe_allow_html=True)`. The animation plays smoothly in the browser while the blocking API call runs.
+
+6. **Databricks Apps service principal needs explicit permissions** — the app.yaml resource declaration doesn't always auto-grant CAN_QUERY. Grant manually: `databricks api patch /api/2.0/permissions/serving-endpoints/{endpoint_id} --json '{"access_control_list":[{"service_principal_name":"...","permission_level":"CAN_QUERY"}]}'`
+
+7. **Selectbox white-on-white CSS fix** — only override `div[data-baseweb="select"]>div>div` (the trigger text), NOT the dropdown list items which need their default readable background.
 
 ## Design References
 
 - `gtm_implementation_guide.html` — Full 7-phase implementation plan with code examples.
 - `gtm_memory_layer.html` — Stateful memory layer design (CheckpointSaver, extraction agent, time travel).
+- `PLAN_v2_comprehensive_demo.md` — v2 command center design plan with [HELIX] design system spec.
+- `databricks_showcase.html` — Original HTML prototype that inspired the showcase app.

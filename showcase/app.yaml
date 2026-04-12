@@ -1,0 +1,10 @@
+command:
+  - streamlit
+  - run
+  - app.py
+
+resources:
+  - name: deal-intelligence-endpoint
+    serving_endpoint:
+      name: agents_users-aradhya_chouhan-gtm_deal_intelligence_agent
+      permission: CAN_QUERY
