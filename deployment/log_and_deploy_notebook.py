@@ -47,12 +47,21 @@ deal_stories_retriever = VectorSearchRetrieverTool(
 
 all_tools = list(uc_toolkit.tools) + [transcript_retriever, battlecard_retriever, deal_stories_retriever]
 
-resources = [DatabricksServingEndpoint(endpoint_name=LLM_ENDPOINT)]
+MEMORY_LLM_ENDPOINT = "databricks-claude-haiku-4-5"
+
+resources = [
+    DatabricksServingEndpoint(endpoint_name=LLM_ENDPOINT),
+    DatabricksServingEndpoint(endpoint_name=MEMORY_LLM_ENDPOINT),  # Memory extraction
+]
 for tool in all_tools:
     if isinstance(tool, UnityCatalogTool):
         resources.append(DatabricksFunction(function_name=tool.uc_function_name))
     elif isinstance(tool, VectorSearchRetrieverTool):
         resources.extend(tool.resources)
+
+# Note: recall_lakebase_memory and store_lakebase_memory are custom Python tools
+# that use SQL Statement Execution API — no additional resource declarations needed
+# as they authenticate via the serving endpoint's service principal.
 
 print(f"Resources: {len(resources)}")
 

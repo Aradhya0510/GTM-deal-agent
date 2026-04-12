@@ -12,3 +12,7 @@ venv/
 *.ipynb_checkpoints/
 .ruff_cache/
 .pytest_cache/
+
+# Claude Code project files — local only, not for remote
+CLAUDE.md
+PLAN_v2_comprehensive_demo.md

@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Databricks · Mission Control</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #05080f;
+  --ink2: #0c1220;
+  --ink3: #141e30;
+  --ink4: #1c2840;
+  --surface: #1e2d42;
+  --b: rgba(255,255,255,0.06);
+  --b2: rgba(255,255,255,0.11);
+  --b3: rgba(255,255,255,0.18);
+  --txt: #dce8f5;
+  --txt2: #7d97b4;
+  --txt3: #3d5470;
+  --red: #FF3621;
+  --red2: rgba(255,54,33,0.15);
+  --red3: rgba(255,54,33,0.08);
+  --cyan: #00d4ff;
+  --cyan2: rgba(0,212,255,0.12);
+  --teal: #00e5b4;
+  --teal2: rgba(0,229,180,0.1);
+  --amber: #ffb830;
+  --amber2: rgba(255,184,48,0.1);
+  --violet: #a78bfa;
+  --violet2: rgba(167,139,250,0.1);
+  --green: #4ade80;
+  --green2: rgba(74,222,128,0.1);
+  --rose: #fb7185;
+  --sans: 'DM Sans', system-ui, sans-serif;
+  --display: 'Syne', system-ui, sans-serif;
+  --mono: 'DM Mono', monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{font-size:14px;scroll-behavior:smooth}
+body{background:var(--ink);color:var(--txt);font-family:var(--sans);font-size:14px;line-height:1.5;overflow:hidden;height:100vh;display:flex;flex-direction:column}
+
+/* ── TOPBAR ── */
+.topbar{display:flex;align-items:center;gap:0;height:48px;border-bottom:1px solid var(--b2);flex-shrink:0;background:rgba(5,8,15,0.95);backdrop-filter:blur(12px);position:relative;z-index:100}
+.tb-logo{display:flex;align-items:center;gap:10px;padding:0 20px;border-right:1px solid var(--b);height:100%}
+.tb-logo-mark{width:22px;height:22px;background:var(--red);border-radius:4px;display:flex;align-items:center;justify-content:center}
+.tb-logo-mark svg{width:13px;height:13px;fill:white}
+.tb-logo-text{font-family:var(--display);font-size:13px;font-weight:700;letter-spacing:.01em;color:var(--txt)}
+.tb-nav{display:flex;height:100%}
+.tb-tab{display:flex;align-items:center;gap:7px;padding:0 18px;font-size:12px;font-weight:500;color:var(--txt2);cursor:pointer;border-bottom:2px solid transparent;transition:all .18s;border-right:1px solid var(--b);font-family:var(--display);letter-spacing:.02em;white-space:nowrap}
+.tb-tab:hover{color:var(--txt);background:rgba(255,255,255,0.03)}
+.tb-tab.active{color:var(--txt);border-bottom-color:var(--red)}
+.tb-tab .tab-dot{width:6px;height:6px;border-radius:50%;background:var(--txt3);flex-shrink:0;transition:background .18s}
+.tb-tab.active .tab-dot,.tb-tab:hover .tab-dot{background:var(--red)}
+.tb-right{margin-left:auto;display:flex;align-items:center;gap:0;height:100%}
+.tb-status{display:flex;align-items:center;gap:6px;padding:0 16px;font-size:11px;color:var(--txt2);font-family:var(--mono);border-left:1px solid var(--b)}
+.pulse{width:6px;height:6px;border-radius:50%;background:var(--teal);box-shadow:0 0 0 0 rgba(0,229,180,0.5);animation:pulse 2s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(0,229,180,0.4)}70%{box-shadow:0 0 0 6px rgba(0,229,180,0)}100%{box-shadow:0 0 0 0 rgba(0,229,180,0)}}
+
+/* ── VERTICAL SELECTOR BAR ── */
+.industry-bar{width:44px;border-right:1px solid var(--b2);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;flex-shrink:0;background:var(--ink2)}
+.ind-btn{width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;transition:all .18s;border:1px solid transparent;position:relative}
+.ind-btn:hover{background:var(--b);border-color:var(--b2)}
+.ind-btn.active{background:var(--red2);border-color:rgba(255,54,33,0.3)}
+.ind-btn .tooltip{position:absolute;left:calc(100% + 8px);background:var(--ink3);border:1px solid var(--b2);color:var(--txt);font-size:11px;padding:4px 8px;border-radius:4px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .15s;z-index:200;font-family:var(--mono)}
+.ind-btn:hover .tooltip{opacity:1}
+
+/* ── MAIN LAYOUT ── */
+.app-body{display:flex;flex:1;overflow:hidden}
+.page{display:none;flex:1;overflow:hidden}
+.page.active{display:flex}
+
+/* ══════════════════════════════════════════════════
+   SCREEN 1 · MORNING BRIEFING
+══════════════════════════════════════════════════ */
+.briefing{flex:1;display:grid;grid-template-columns:1fr 360px;overflow:hidden}
+.brief-main{overflow-y:auto;padding:28px 28px 28px;display:flex;flex-direction:column;gap:20px}
+.brief-rail{border-left:1px solid var(--b2);background:var(--ink2);overflow-y:auto;display:flex;flex-direction:column}
+
+/* Header strip */
+.brief-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.brief-greeting{font-family:var(--display);font-size:22px;font-weight:800;line-height:1.2;color:var(--txt)}
+.brief-greeting span{color:var(--red)}
+.brief-meta{font-size:11px;color:var(--txt3);font-family:var(--mono);margin-top:4px}
+.kpi-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.kpi{background:var(--ink2);border:1px solid var(--b);border-radius:8px;padding:14px 16px;position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.kpi.red::before{background:var(--red)}
+.kpi.cyan::before{background:var(--cyan)}
+.kpi.teal::before{background:var(--teal)}
+.kpi.amber::before{background:var(--amber)}
+.kpi-val{font-family:var(--display);font-size:24px;font-weight:800;line-height:1;margin-bottom:4px}
+.kpi.red .kpi-val{color:var(--red)}
+.kpi.cyan .kpi-val{color:var(--cyan)}
+.kpi.teal .kpi-val{color:var(--teal)}
+.kpi.amber .kpi-val{color:var(--amber)}
+.kpi-label{font-size:11px;color:var(--txt3);font-family:var(--mono)}
+.kpi-sub{font-size:10px;color:var(--txt2);margin-top:3px}
+
+/* Priority cards */
+.section-label{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);font-family:var(--mono);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.section-label::after{content:'';flex:1;height:1px;background:var(--b)}
+.priority-cards{display:flex;flex-direction:column;gap:10px}
+.pcard{background:var(--ink2);border:1px solid var(--b);border-radius:10px;padding:16px;cursor:pointer;transition:all .18s;position:relative;overflow:hidden}
+.pcard:hover{border-color:var(--b2);background:var(--ink3)}
+.pcard.selected{border-color:var(--red);background:var(--red3)}
+.pcard-top{display:flex;align-items:flex-start;gap:12px;margin-bottom:10px}
+.pcard-industry{width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.pcard-meta{flex:1;min-width:0}
+.pcard-company{font-family:var(--display);font-size:14px;font-weight:700;color:var(--txt)}
+.pcard-deal{font-size:11px;color:var(--txt2);font-family:var(--mono)}
+.pcard-score{text-align:right;flex-shrink:0}
+.score-ring{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--display);font-size:13px;font-weight:800;border:2px solid}
+.score-high{border-color:var(--teal);color:var(--teal);background:var(--teal2)}
+.score-mid{border-color:var(--amber);color:var(--amber);background:var(--amber2)}
+.score-low{border-color:var(--rose);color:var(--rose);background:rgba(251,113,133,0.1)}
+.risk-flags{display:flex;flex-wrap:wrap;gap:5px}
+.rflag{font-size:10px;padding:3px 7px;border-radius:3px;font-family:var(--mono);font-weight:500}
+.rflag.red{background:rgba(255,54,33,0.12);color:var(--red);border:1px solid rgba(255,54,33,0.2)}
+.rflag.amber{background:var(--amber2);color:var(--amber);border:1px solid rgba(255,184,48,0.2)}
+.rflag.cyan{background:var(--cyan2);color:var(--cyan);border:1px solid rgba(0,212,255,0.2)}
+.rflag.teal{background:var(--teal2);color:var(--teal);border:1px solid rgba(0,229,180,0.2)}
+.pcard-action{margin-top:10px;display:flex;gap:8px}
+.btn-primary{display:inline-flex;align-items:center;gap:5px;background:var(--red);color:white;font-size:11px;font-weight:600;padding:6px 12px;border-radius:5px;cursor:pointer;font-family:var(--display);letter-spacing:.02em;border:none;transition:opacity .15s}
+.btn-primary:hover{opacity:.88}
+.btn-ghost{display:inline-flex;align-items:center;gap:5px;background:transparent;color:var(--txt2);font-size:11px;font-weight:500;padding:6px 12px;border-radius:5px;cursor:pointer;font-family:var(--sans);border:1px solid var(--b2);transition:all .15s}
+.btn-ghost:hover{border-color:var(--b3);color:var(--txt)}
+
+/* Pipeline agent ran overnight banner */
+.overnight-banner{background:linear-gradient(90deg,rgba(0,229,180,0.08) 0%,rgba(0,0,0,0) 100%);border:1px solid rgba(0,229,180,0.15);border-radius:8px;padding:12px 16px;display:flex;align-items:center;gap:12px}
+.ob-icon{font-size:16px}
+.ob-text{font-size:12px;color:var(--txt2)}<br>.ob-text strong{color:var(--teal)}
+.ob-badge{margin-left:auto;font-size:10px;font-family:var(--mono);background:var(--teal2);color:var(--teal);padding:3px 8px;border-radius:3px;border:1px solid rgba(0,229,180,0.2)}
+
+/* RAIL - reasoning */
+.rail-header{padding:16px;border-bottom:1px solid var(--b);display:flex;align-items:center;justify-content:space-between}
+.rail-title{font-family:var(--display);font-size:12px;font-weight:700;color:var(--txt);letter-spacing:.04em;text-transform:uppercase}
+.rail-body{padding:16px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+.rail-section{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);font-family:var(--mono);margin-bottom:6px}
+.trace-step{display:flex;gap:10px;align-items:flex-start}
+.trace-icon{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;border:1px solid}
+.trace-icon.done{background:var(--teal2);border-color:var(--teal);color:var(--teal)}
+.trace-icon.running{background:var(--cyan2);border-color:var(--cyan);color:var(--cyan);animation:spinPulse 1.5s infinite}
+@keyframes spinPulse{0%,100%{opacity:1}50%{opacity:.5}}
+.trace-icon.queued{background:var(--b);border-color:var(--b2);color:var(--txt3)}
+.trace-content{flex:1;min-width:0}
+.trace-label{font-size:12px;font-weight:500;color:var(--txt);margin-bottom:2px}
+.trace-detail{font-size:11px;color:var(--txt2);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trace-latency{font-size:10px;color:var(--txt3);font-family:var(--mono);margin-top:1px}
+.trace-line{width:1px;height:10px;background:var(--b2);margin:2px 0 2px 11px}
+.qual-badge{display:flex;align-items:center;justify-content:space-between;background:var(--ink3);border:1px solid var(--b);border-radius:6px;padding:8px 10px}
+.qb-label{font-size:11px;color:var(--txt2);font-family:var(--mono)}
+.qb-score{font-family:var(--display);font-size:13px;font-weight:700}
+.qb-score.hi{color:var(--teal)}
+.qb-score.mid{color:var(--amber)}
+.mem-chip{background:var(--violet2);border:1px solid rgba(167,139,250,0.2);border-radius:5px;padding:7px 10px;font-size:11px;color:var(--violet);font-family:var(--mono)}
+.mem-chip span{color:var(--txt2)}
+.uc-strip{background:var(--ink3);border:1px solid var(--b);border-radius:6px;padding:8px 10px;display:flex;align-items:center;gap:6px;font-size:10px;color:var(--txt3);font-family:var(--mono)}
+.uc-dot{width:5px;height:5px;border-radius:50%;background:var(--teal);flex-shrink:0}
+
+/* ══════════════════════════════════════════════════
+   SCREEN 2 · DEAL ROOM
+══════════════════════════════════════════════════ */
+.deal-room{flex:1;display:grid;grid-template-columns:300px 1fr 340px;overflow:hidden}
+.dr-left{border-right:1px solid var(--b2);overflow-y:auto;background:var(--ink2)}
+.dr-center{overflow:hidden;display:flex;flex-direction:column}
+.dr-right{border-left:1px solid var(--b2);overflow-y:auto;background:var(--ink2)}
+
+.dr-account-hero{padding:20px;border-bottom:1px solid var(--b)}
+.dr-company{font-family:var(--display);font-size:18px;font-weight:800;color:var(--txt);margin-bottom:4px}
+.dr-vertical{font-size:11px;color:var(--txt2);font-family:var(--mono)}
+.dr-metrics{display:flex;flex-direction:column;gap:8px;padding:16px}
+.dr-metric{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--ink3);border-radius:6px;border:1px solid var(--b)}
+.dr-metric-label{font-size:11px;color:var(--txt2)}
+.dr-metric-val{font-size:12px;font-weight:600;color:var(--txt);font-family:var(--mono)}
+
+/* Health gauge */
+.health-gauge{padding:16px;border-bottom:1px solid var(--b);text-align:center}
+.gauge-wrap{position:relative;width:100px;height:60px;margin:0 auto 8px}
+.gauge-track{width:100px;height:50px;border-radius:50px 50px 0 0;border:6px solid var(--b2);border-bottom:none;position:absolute;top:0}
+.gauge-fill{width:100px;height:50px;border-radius:50px 50px 0 0;border:6px solid var(--teal);border-bottom:none;position:absolute;top:0;clip-path:polygon(0 0,72% 0,72% 100%,0 100%)}
+.gauge-val{position:absolute;bottom:0;left:50%;transform:translateX(-50%);font-family:var(--display);font-size:20px;font-weight:800;color:var(--teal)}
+.gauge-label{font-size:10px;color:var(--txt3);font-family:var(--mono)}
+
+/* Chat */
+.dr-chat-header{padding:14px 16px;border-bottom:1px solid var(--b2);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:var(--ink2)}
+.dr-chat-title{font-family:var(--display);font-size:13px;font-weight:700;color:var(--txt)}
+.thread-pill{font-size:10px;font-family:var(--mono);background:var(--violet2);color:var(--violet);padding:3px 8px;border-radius:3px;border:1px solid rgba(167,139,250,0.2)}
+.chat-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:88%;display:flex;flex-direction:column;gap:4px}
+.msg.user{align-self:flex-end;align-items:flex-end}
+.msg.agent{align-self:flex-start}
+.msg-bubble{padding:10px 13px;border-radius:10px;font-size:13px;line-height:1.55}
+.msg.user .msg-bubble{background:var(--red);color:white;border-radius:10px 10px 2px 10px}
+.msg.agent .msg-bubble{background:var(--ink3);color:var(--txt);border:1px solid var(--b2);border-radius:10px 10px 10px 2px}
+.msg-meta{font-size:10px;color:var(--txt3);font-family:var(--mono)}
+.msg-qual{display:flex;gap:5px;margin-top:4px}
+.chat-input-wrap{padding:12px 16px;border-top:1px solid var(--b2);display:flex;gap:8px;flex-shrink:0}
+.chat-input{flex:1;background:var(--ink3);border:1px solid var(--b2);border-radius:7px;padding:9px 13px;font-size:13px;color:var(--txt);font-family:var(--sans);outline:none;transition:border-color .15s}
+.chat-input:focus{border-color:var(--red)}
+.chat-send{width:36px;height:36px;border-radius:7px;background:var(--red);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:opacity .15s}
+.chat-send:hover{opacity:.85}
+
+/* Memory panel */
+.mem-panel{padding:16px;border-bottom:1px solid var(--b)}
+.mem-entry{background:var(--ink3);border:1px solid rgba(167,139,250,0.15);border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:11px;color:var(--txt2);line-height:1.5}
+.mem-entry strong{color:var(--violet)}
+
+/* Agent graph */
+.agent-graph{padding:16px;border-bottom:1px solid var(--b)}
+.graph-nodes{display:flex;flex-direction:column;gap:0}
+.gnode{display:flex;align-items:center;gap:10px;padding:8px 0}
+.gnode-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.gnode-line{width:1px;height:16px;margin-left:4px;background:var(--b2)}
+.gnode-label{font-size:12px;color:var(--txt)}
+.gnode-status{margin-left:auto;font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:3px}
+.gnode-status.done{background:var(--teal2);color:var(--teal)}
+.gnode-status.active{background:var(--cyan2);color:var(--cyan);animation:blink .8s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+.gnode-status.idle{background:var(--b);color:var(--txt3)}
+
+/* ══════════════════════════════════════════════════
+   SCREEN 3 · OUTREACH STUDIO
+══════════════════════════════════════════════════ */
+.studio{flex:1;display:grid;grid-template-columns:1fr 1fr 320px;overflow:hidden}
+.studio-col{border-right:1px solid var(--b2);display:flex;flex-direction:column;overflow:hidden}
+.studio-col:last-child{border-right:none}
+.studio-colhdr{padding:14px 18px;border-bottom:1px solid var(--b2);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.studio-colhdr-title{font-family:var(--display);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--txt2)}
+.channel-icon{font-size:16px}
+.studio-body{flex:1;overflow-y:auto;padding:18px}
+.draft-card{background:var(--ink2);border:1px solid var(--b);border-radius:10px;overflow:hidden}
+.draft-subject{padding:12px 16px;border-bottom:1px solid var(--b);font-size:12px;font-family:var(--mono);color:var(--txt2)}
+.draft-subject strong{color:var(--txt)}
+.draft-body{padding:16px;font-size:13px;color:var(--txt);line-height:1.7}
+.draft-footer{padding:12px 16px;border-top:1px solid var(--b);display:flex;align-items:center;justify-content:space-between}
+.qual-pills{display:flex;gap:5px}
+.qpill{font-size:10px;font-family:var(--mono);padding:3px 7px;border-radius:3px}
+.qpill.hi{background:var(--teal2);color:var(--teal);border:1px solid rgba(0,229,180,0.2)}
+.qpill.mid{background:var(--amber2);color:var(--amber);border:1px solid rgba(255,184,48,0.2)}
+.draft-actions{display:flex;gap:6px;margin-top:12px}
+
+.intel-card{background:var(--ink2);border:1px solid var(--b);border-radius:8px;padding:14px;margin-bottom:10px}
+.intel-source{font-size:10px;font-family:var(--mono);color:var(--txt3);margin-bottom:4px;display:flex;align-items:center;gap:5px}
+.intel-dot{width:5px;height:5px;border-radius:50%}
+.intel-text{font-size:12px;color:var(--txt2);line-height:1.5}
+.intel-relevance{font-size:10px;color:var(--txt3);font-family:var(--mono);margin-top:5px}
+
+/* persona prefs */
+.pref-tag{display:inline-flex;align-items:center;gap:4px;background:var(--violet2);border:1px solid rgba(167,139,250,0.2);color:var(--violet);font-size:10px;font-family:var(--mono);padding:3px 7px;border-radius:3px;margin:2px}
+
+/* ══════════════════════════════════════════════════
+   SCREEN 4 · PIPELINE INTELLIGENCE
+══════════════════════════════════════════════════ */
+.pipeline{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.pipe-toolbar{padding:14px 24px;border-bottom:1px solid var(--b2);display:flex;align-items:center;gap:12px;flex-shrink:0;background:var(--ink2)}
+.pipe-title{font-family:var(--display);font-size:15px;font-weight:800;color:var(--txt)}
+.pipe-filters{display:flex;gap:8px;margin-left:16px}
+.filt-btn{font-size:11px;padding:5px 11px;border-radius:5px;border:1px solid var(--b2);color:var(--txt2);cursor:pointer;transition:all .15s;font-family:var(--mono)}
+.filt-btn:hover,.filt-btn.active{background:var(--red2);border-color:rgba(255,54,33,0.3);color:var(--red)}
+.pipe-body{flex:1;overflow-y:auto;padding:20px 24px}
+.pipe-table{width:100%;border-collapse:collapse}
+.pipe-table th{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--txt3);font-family:var(--mono);padding:8px 12px;text-align:left;border-bottom:1px solid var(--b2)}
+.pipe-table td{padding:12px;border-bottom:1px solid var(--b);font-size:12px;vertical-align:middle}
+.pipe-table tr:hover td{background:rgba(255,255,255,.02)}
+.pipe-table tr.selected-row td{background:var(--red3);border-bottom-color:rgba(255,54,33,0.15)}
+.company-cell{display:flex;align-items:center;gap:10px}
+.comp-icon{width:28px;height:28px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+.comp-name{font-family:var(--display);font-size:13px;font-weight:700;color:var(--txt)}
+.comp-vertical{font-size:10px;color:var(--txt3);font-family:var(--mono)}
+.score-bar{display:flex;align-items:center;gap:8px}
+.bar-track{flex:1;height:4px;background:var(--b2);border-radius:2px;overflow:hidden;min-width:60px}
+.bar-fill{height:100%;border-radius:2px}
+.bar-val{font-size:11px;font-family:var(--mono);font-weight:600;min-width:24px}
+.stage-pill{font-size:10px;font-family:var(--mono);padding:3px 8px;border-radius:3px}
+.stage-proposal{background:var(--cyan2);color:var(--cyan);border:1px solid rgba(0,212,255,0.2)}
+.stage-disco{background:var(--amber2);color:var(--amber);border:1px solid rgba(255,184,48,0.2)}
+.stage-negot{background:var(--teal2);color:var(--teal);border:1px solid rgba(0,229,180,0.2)}
+.stage-eval{background:var(--violet2);color:var(--violet);border:1px solid rgba(167,139,250,0.2)}
+.arr-cell{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--txt)}
+.action-cell{display:flex;gap:5px}
+
+/* ══════════════════════════════════════════════════
+   SCREEN 5 · AGENT OBSERVATORY
+══════════════════════════════════════════════════ */
+.observatory{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;overflow:hidden;gap:0}
+.obs-panel{border-right:1px solid var(--b2);border-bottom:1px solid var(--b2);overflow:hidden;display:flex;flex-direction:column}
+.obs-panel:nth-child(2){border-right:none}
+.obs-panel:nth-child(3){border-bottom:none}
+.obs-panel:nth-child(4){border-right:none;border-bottom:none}
+.obs-header{padding:12px 16px;border-bottom:1px solid var(--b2);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:var(--ink2)}
+.obs-title{font-family:var(--display);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--txt2)}
+.obs-live{font-size:10px;font-family:var(--mono);color:var(--teal);display:flex;align-items:center;gap:4px}
+.obs-body{flex:1;overflow-y:auto;padding:14px}
+
+/* Trace timeline */
+.trace-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--b)}
+.trace-row:last-child{border-bottom:none}
+.tr-time{font-size:10px;font-family:var(--mono);color:var(--txt3);min-width:48px}
+.tr-agent{font-size:10px;font-family:var(--mono);min-width:90px}
+.tr-agent.research{color:var(--cyan)}
+.tr-agent.scoring{color:var(--amber)}
+.tr-agent.outreach{color:var(--teal)}
+.tr-agent.memory{color:var(--violet)}
+.tr-bar-wrap{flex:1;height:4px;background:var(--b);border-radius:2px;overflow:hidden}
+.tr-bar{height:100%;border-radius:2px}
+.tr-bar.research{background:var(--cyan)}
+.tr-bar.scoring{background:var(--amber)}
+.tr-bar.outreach{background:var(--teal)}
+.tr-bar.memory{background:var(--violet)}
+.tr-ms{font-size:10px;font-family:var(--mono);color:var(--txt3);min-width:36px;text-align:right}
+.tr-score{font-size:10px;font-family:var(--mono);min-width:28px;text-align:right;font-weight:600}
+
+/* Eval chart */
+.eval-chart{display:flex;flex-direction:column;gap:10px}
+.eval-metric-row{display:flex;align-items:center;gap:12px}
+.eval-label{font-size:11px;color:var(--txt2);font-family:var(--mono);min-width:130px}
+.eval-track{flex:1;height:8px;background:var(--b2);border-radius:4px;overflow:hidden}
+.eval-fill{height:100%;border-radius:4px;transition:width .8s ease}
+.eval-val{font-size:11px;font-family:var(--mono);font-weight:700;min-width:30px;text-align:right}
+
+/* Memory browser */
+.mem-browser{display:flex;flex-direction:column;gap:8px}
+.mb-entry{background:var(--ink3);border:1px solid var(--b);border-radius:6px;padding:10px;display:flex;gap:10px;align-items:flex-start}
+.mb-type{font-size:9px;font-family:var(--mono);padding:2px 6px;border-radius:3px;flex-shrink:0;margin-top:2px}
+.mb-type.pref{background:var(--violet2);color:var(--violet);border:1px solid rgba(167,139,250,0.2)}
+.mb-type.account{background:var(--cyan2);color:var(--cyan);border:1px solid rgba(0,212,255,0.2)}
+.mb-type.decision{background:var(--teal2);color:var(--teal);border:1px solid rgba(0,229,180,0.2)}
+.mb-content{font-size:11px;color:var(--txt2);line-height:1.5;flex:1}
+.mb-content strong{color:var(--txt)}
+.mb-age{font-size:10px;color:var(--txt3);font-family:var(--mono);margin-top:3px}
+
+/* Lakewatch alerts */
+.lw-entry{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--b)}
+.lw-entry:last-child{border-bottom:none}
+.lw-sev{font-size:9px;font-family:var(--mono);padding:2px 6px;border-radius:3px;flex-shrink:0;margin-top:2px}
+.lw-sev.ok{background:var(--teal2);color:var(--teal);border:1px solid rgba(0,229,180,0.2)}
+.lw-sev.info{background:var(--cyan2);color:var(--cyan);border:1px solid rgba(0,212,255,0.2)}
+.lw-sev.warn{background:var(--amber2);color:var(--amber);border:1px solid rgba(255,184,48,0.2)}
+.lw-sev.crit{background:rgba(255,54,33,0.12);color:var(--red);border:1px solid rgba(255,54,33,0.2)}
+.lw-msg{font-size:11px;color:var(--txt2);line-height:1.5;flex:1}
+.lw-msg strong{color:var(--txt)}
+.lw-time{font-size:10px;color:var(--txt3);font-family:var(--mono);flex-shrink:0}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px}
+::-webkit-scrollbar-thumb:hover{background:var(--b3)}
+
+/* Trend sparkline */
+.sparkline{display:flex;align-items:flex-end;gap:2px;height:32px}
+.spark-bar{width:6px;border-radius:1px;background:var(--teal);opacity:.7;transition:opacity .15s}
+.spark-bar:hover{opacity:1}
+</style>
+</head>
+<body>
+
+<!-- ── TOPBAR ── -->
+<div class="topbar">
+  <div class="tb-logo">
+    <div class="tb-logo-mark">
+      <svg viewBox="0 0 16 16"><polygon points="8,1 15,5 15,11 8,15 1,11 1,5"/></svg>
+    </div>
+    <span class="tb-logo-text">Mission Control</span>
+  </div>
+  <div class="tb-nav">
+    <div class="tb-tab active" onclick="showTab('briefing',this)"><span class="tab-dot"></span>Morning Briefing</div>
+    <div class="tb-tab" onclick="showTab('dealroom',this)"><span class="tab-dot"></span>Deal Room</div>
+    <div class="tb-tab" onclick="showTab('studio',this)"><span class="tab-dot"></span>Outreach Studio</div>
+    <div class="tb-tab" onclick="showTab('pipeline',this)"><span class="tab-dot"></span>Pipeline Intelligence</div>
+    <div class="tb-tab" onclick="showTab('observatory',this)"><span class="tab-dot"></span>Agent Observatory</div>
+  </div>
+  <div class="tb-right">
+    <div class="tb-status"><span class="pulse"></span>Lakewatch: 0 alerts</div>
+    <div class="tb-status">UC · West Territory</div>
+    <div class="tb-status">MLflow traced</div>
+  </div>
+</div>
+
+<div class="app-body">
+
+<!-- ── INDUSTRY SIDEBAR ── -->
+<div class="industry-bar">
+  <div class="ind-btn active" onclick="setIndustry('finserv',this)" title="Financial Services">🏦<div class="tooltip">Financial Services</div></div>
+  <div class="ind-btn" onclick="setIndustry('health',this)">🏥<div class="tooltip">Healthcare</div></div>
+  <div class="ind-btn" onclick="setIndustry('retail',this)">🛍️<div class="tooltip">Retail</div></div>
+  <div class="ind-btn" onclick="setIndustry('mfg',this)">🏭<div class="tooltip">Manufacturing</div></div>
+  <div class="ind-btn" onclick="setIndustry('tech',this)">💻<div class="tooltip">Technology</div></div>
+  <div class="ind-btn" onclick="setIndustry('energy',this)">⚡<div class="tooltip">Energy</div></div>
+</div>
+
+<!-- ══════════ SCREEN 1: MORNING BRIEFING ══════════ -->
+<div class="page active" id="page-briefing">
+<div class="briefing">
+  <div class="brief-main">
+    <div class="brief-header">
+      <div>
+        <div class="brief-greeting">Good morning. Here's your <span id="industry-label">portfolio</span> intelligence.</div>
+        <div class="brief-meta" id="brief-meta">Lakeflow ran at 05:00 · 24 accounts analyzed · 3 priority actions</div>
+      </div>
+    </div>
+
+    <div class="overnight-banner">
+      <div class="ob-icon">⚙️</div>
+      <div class="ob-text"><strong>Lakeflow pipeline</strong> ran overnight · Deal health scored via fine-tuned model · Memory extracted from 8 prior sessions · 3 anomalies surfaced</div>
+      <div class="ob-badge">Genie Code</div>
+    </div>
+
+    <div class="kpi-strip">
+      <div class="kpi red"><div class="kpi-val" id="kpi1-val">$4.2M</div><div class="kpi-label">At-risk pipeline</div><div class="kpi-sub" id="kpi1-sub">↑ $800K from last week</div></div>
+      <div class="kpi cyan"><div class="kpi-val" id="kpi2-val">71</div><div class="kpi-label">Avg health score</div><div class="kpi-sub">Scored by Llama 3.1</div></div>
+      <div class="kpi teal"><div class="kpi-val" id="kpi3-val">12</div><div class="kpi-label">Drafts ready to send</div><div class="kpi-sub">Agent-generated overnight</div></div>
+      <div class="kpi amber"><div class="kpi-val" id="kpi4-val">3</div><div class="kpi-label">Champion changes</div><div class="kpi-sub">Detected via memory</div></div>
+    </div>
+
+    <div>
+      <div class="section-label">Priority actions · agent-ranked</div>
+      <div class="priority-cards" id="priority-cards"></div>
+    </div>
+  </div>
+
+  <!-- RAIL -->
+  <div class="brief-rail">
+    <div class="rail-header">
+      <div class="rail-title">Agent Reasoning</div>
+      <div style="font-size:10px;font-family:var(--mono);color:var(--txt3)">MLflow trace</div>
+    </div>
+    <div class="rail-body">
+      <div class="rail-section">Agent graph · last run</div>
+      <div class="trace-step"><div class="trace-icon done">✓</div><div class="trace-content"><div class="trace-label">Load memory</div><div class="trace-detail">Injected 6 AE prefs + 14 account facts</div><div class="trace-latency">42ms · Lakebase</div></div></div>
+      <div class="trace-line"></div>
+      <div class="trace-step"><div class="trace-icon done">✓</div><div class="trace-content"><div class="trace-label">Research Agent</div><div class="trace-detail">Salesforce MCP · Gong MCP · Vec search</div><div class="trace-latency">1.2s · 3 tools called</div></div></div>
+      <div class="trace-line"></div>
+      <div class="trace-step"><div class="trace-icon done">✓</div><div class="trace-content"><div class="trace-label">Scoring Agent</div><div class="trace-detail">Fine-tuned Llama 3.1 · 24 deals scored</div><div class="trace-latency">890ms · Model Serving</div></div></div>
+      <div class="trace-line"></div>
+      <div class="trace-step"><div class="trace-icon done">✓</div><div class="trace-content"><div class="trace-label">Outreach Agent</div><div class="trace-detail">Claude · 3 drafts generated</div><div class="trace-latency">2.1s · LLM Gateway</div></div></div>
+      <div class="trace-line"></div>
+      <div class="trace-step"><div class="trace-icon done">✓</div><div class="trace-content"><div class="trace-label">Save memory</div><div class="trace-detail">8 new facts extracted → Lakebase</div><div class="trace-latency">67ms async</div></div></div>
+
+      <div class="rail-section" style="margin-top:14px">Quality scores</div>
+      <div class="qual-badge"><span class="qb-label">Groundedness</span><span class="qb-score hi">0.94</span></div>
+      <div style="height:6px"></div>
+      <div class="qual-badge"><span class="qb-label">Personalization</span><span class="qb-score hi">0.88</span></div>
+      <div style="height:6px"></div>
+      <div class="qual-badge"><span class="qb-label">Retrieval precision</span><span class="qb-score mid">0.81</span></div>
+
+      <div class="rail-section" style="margin-top:14px">Memory injected</div>
+      <div class="mem-chip"><span>AE pref ·</span> emails &lt;120 words</div>
+      <div style="height:5px"></div>
+      <div class="mem-chip"><span>Account ·</span> champion changed Feb '26</div>
+      <div style="height:5px"></div>
+      <div class="mem-chip"><span>Account ·</span> budget frozen Q1</div>
+
+      <div class="rail-section" style="margin-top:14px">Governance</div>
+      <div class="uc-strip"><div class="uc-dot"></div>Row filter active · Territory scoped</div>
+      <div style="height:5px"></div>
+      <div class="uc-strip"><div class="uc-dot"></div>Lineage tracked · Unity Catalog</div>
+      <div style="height:5px"></div>
+      <div class="uc-strip"><div class="uc-dot" style="background:var(--teal)"></div>Lakewatch · 0 anomalies</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════ SCREEN 2: DEAL ROOM ══════════ -->
+<div class="page" id="page-dealroom">
+<div class="deal-room">
+  <div class="dr-left">
+    <div class="dr-account-hero">
+      <div style="font-size:24px;margin-bottom:8px" id="dr-icon">🏦</div>
+      <div class="dr-company" id="dr-company">Meridian Capital Group</div>
+      <div class="dr-vertical" id="dr-vertical">Financial Services · Enterprise</div>
+    </div>
+    <div class="health-gauge">
+      <div class="gauge-label" style="margin-bottom:6px">DEAL HEALTH · Llama 3.1</div>
+      <div class="gauge-wrap">
+        <div class="gauge-track"></div>
+        <div class="gauge-fill" id="dr-gauge-fill"></div>
+        <div class="gauge-val" id="dr-gauge-val">72</div>
+      </div>
+      <div class="gauge-label">Scored by fine-tuned model</div>
+    </div>
+    <div class="dr-metrics">
+      <div class="dr-metric"><span class="dr-metric-label">ARR</span><span class="dr-metric-val" id="dr-arr">$2.4M</span></div>
+      <div class="dr-metric"><span class="dr-metric-label">Stage</span><span class="dr-metric-val" id="dr-stage">Proposal</span></div>
+      <div class="dr-metric"><span class="dr-metric-label">Close date</span><span class="dr-metric-val">Jun 30, 2026</span></div>
+      <div class="dr-metric"><span class="dr-metric-label">Champion</span><span class="dr-metric-val" id="dr-champion">M. Torres (VP Eng)</span></div>
+      <div class="dr-metric"><span class="dr-metric-label">Last Gong call</span><span class="dr-metric-val">18d ago</span></div>
+      <div class="dr-metric"><span class="dr-metric-label">Competing with</span><span class="dr-metric-val" id="dr-competitor">Snowflake</span></div>
+    </div>
+    <div class="agent-graph" style="padding:16px">
+      <div class="rail-section">Agent graph</div>
+      <div class="graph-nodes">
+        <div class="gnode"><div class="gnode-dot" style="background:var(--violet)"></div><span class="gnode-label">Load memory</span><span class="gnode-status done">done</span></div>
+        <div class="gnode-line"></div>
+        <div class="gnode"><div class="gnode-dot" style="background:var(--cyan)"></div><span class="gnode-label">Research Agent</span><span class="gnode-status done">done</span></div>
+        <div class="gnode-line"></div>
+        <div class="gnode"><div class="gnode-dot" style="background:var(--amber)"></div><span class="gnode-label">Scoring Agent</span><span class="gnode-status done">done</span></div>
+        <div class="gnode-line"></div>
+        <div class="gnode"><div class="gnode-dot" style="background:var(--teal)"></div><span class="gnode-label">Outreach Agent</span><span class="gnode-status active">running</span></div>
+        <div class="gnode-line"></div>
+        <div class="gnode"><div class="gnode-dot" style="background:var(--txt3)"></div><span class="gnode-label">Save memory</span><span class="gnode-status idle">queued</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dr-center">
+    <div class="dr-chat-header">
+      <div class="dr-chat-title">Agent conversation</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="thread-pill" id="thread-pill">thread · a3f2b8</div>
+        <div class="btn-ghost" style="font-size:10px;padding:4px 8px" onclick="branchConvo()">⎇ Branch</div>
+      </div>
+    </div>
+    <div class="chat-messages" id="chat-messages">
+      <div class="msg agent"><div class="msg-bubble" id="dr-msg1"></div><div class="msg-meta">Research Agent · 1.2s · Salesforce MCP + Gong MCP</div><div class="msg-qual"><span class="rflag teal">groundedness 0.94</span><span class="rflag cyan">retrieval ×4</span></div></div>
+      <div class="msg user"><div class="msg-bubble">Draft a follow-up for tomorrow. Under 120 words, focus on the migration angle.</div><div class="msg-meta">Memory: email pref applied</div></div>
+      <div class="msg agent"><div class="msg-bubble" id="dr-msg2"></div><div class="msg-meta">Outreach Agent · 2.1s · Claude via LLM Gateway</div><div class="msg-qual"><span class="rflag teal">personalization 0.91</span><span class="rflag teal">114 words ✓</span></div></div>
+    </div>
+    <div class="chat-input-wrap">
+      <input class="chat-input" id="chat-input" placeholder="Ask about this deal, refine the draft, explore risks..." onkeydown="if(event.key==='Enter')sendChat()"/>
+      <button class="chat-send" onclick="sendChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+    </div>
+  </div>
+
+  <div class="dr-right">
+    <div style="padding:14px 16px;border-bottom:1px solid var(--b2)">
+      <div class="rail-title" style="font-family:var(--display);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--txt2)">Long-term memory</div>
+    </div>
+    <div class="mem-panel">
+      <div class="rail-section">AE preferences</div>
+      <div class="mem-entry"><strong>Email length</strong><br>Keep under 120 words — stated 3 sessions ago</div>
+      <div class="mem-entry"><strong>CTA style</strong><br>Prefer "15-min call" over longer meeting asks</div>
+      <div class="mem-entry"><strong>Competitor</strong><br>Do not mention Salesforce by name in outreach</div>
+    </div>
+    <div style="padding:16px;border-bottom:1px solid var(--b)">
+      <div class="rail-section">Account context</div>
+      <div class="mem-entry"><strong>Champion changed</strong> Feb 2026<br>Sarah Chen → <span style="color:var(--cyan)">Mike Torres (VP Eng)</span></div>
+      <div class="mem-entry" id="dr-mem-context"></div>
+      <div class="mem-entry"><strong>Competing with</strong> <span id="dr-mem-competitor">Snowflake</span><br>Key differentiator: open format + governance</div>
+    </div>
+    <div style="padding:16px">
+      <div class="rail-section">Risk flags · Scoring Agent</div>
+      <div style="display:flex;flex-direction:column;gap:6px" id="dr-risks"></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════ SCREEN 3: OUTREACH STUDIO ══════════ -->
+<div class="page" id="page-studio">
+<div class="studio">
+  <div class="studio-col">
+    <div class="studio-colhdr">
+      <div class="studio-colhdr-title"><span class="channel-icon">✉️</span> Email</div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="rflag teal">0.91 personalization</span>
+      </div>
+    </div>
+    <div class="studio-body">
+      <div class="draft-card">
+        <div class="draft-subject">Subject: <strong id="email-subject"></strong></div>
+        <div class="draft-body" id="email-body"></div>
+        <div class="draft-footer">
+          <div class="qual-pills">
+            <span class="qpill hi">Grounded 0.94</span>
+            <span class="qpill hi" id="email-wordcount"></span>
+            <span class="qpill hi">Pref applied ✓</span>
+          </div>
+        </div>
+      </div>
+      <div class="draft-actions">
+        <button class="btn-primary">Approve → Salesforce</button>
+        <button class="btn-ghost">Regenerate</button>
+        <button class="btn-ghost">Edit</button>
+      </div>
+      <div style="margin-top:16px">
+        <div class="rail-section">Memory applied silently</div>
+        <div class="pref-tag">email_max_words: 120</div>
+        <div class="pref-tag">avoid: Salesforce</div>
+        <div class="pref-tag">CTA: 15-min call</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="studio-col">
+    <div class="studio-colhdr">
+      <div class="studio-colhdr-title"><span class="channel-icon">💼</span> LinkedIn</div>
+      <div><span class="rflag cyan">0.87 personalization</span></div>
+    </div>
+    <div class="studio-body">
+      <div class="draft-card">
+        <div class="draft-body" id="linkedin-body" style="font-size:13px;line-height:1.7"></div>
+        <div class="draft-footer">
+          <div class="qual-pills">
+            <span class="qpill hi">Grounded 0.89</span>
+            <span class="qpill mid">Retrieval ×2</span>
+          </div>
+        </div>
+      </div>
+      <div class="draft-actions">
+        <button class="btn-primary">Copy to LinkedIn</button>
+        <button class="btn-ghost">Regenerate</button>
+      </div>
+      <div style="margin-top:16px">
+        <div class="rail-section">Retrieved intel · Vector Search</div>
+        <div class="intel-card">
+          <div class="intel-source"><div class="intel-dot" style="background:var(--cyan)"></div>Gong transcript · 24d ago</div>
+          <div class="intel-text" id="intel1"></div>
+          <div class="intel-relevance">Relevance: 0.91 · used in personalization</div>
+        </div>
+        <div class="intel-card">
+          <div class="intel-source"><div class="intel-dot" style="background:var(--teal)"></div>Win story · similar vertical</div>
+          <div class="intel-text" id="intel2"></div>
+          <div class="intel-relevance">Relevance: 0.85 · proof point applied</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="studio-col" style="border-right:none">
+    <div class="studio-colhdr">
+      <div class="studio-colhdr-title">📞 Call talk track</div>
+    </div>
+    <div class="studio-body">
+      <div style="margin-bottom:12px">
+        <div class="rail-section">Opening</div>
+        <div style="font-size:13px;color:var(--txt);line-height:1.65;background:var(--ink2);border:1px solid var(--b);border-radius:8px;padding:12px" id="call-opening"></div>
+      </div>
+      <div style="margin-bottom:12px">
+        <div class="rail-section">Key questions</div>
+        <div style="display:flex;flex-direction:column;gap:6px" id="call-questions"></div>
+      </div>
+      <div>
+        <div class="rail-section">Battlecard snippet · <span style="color:var(--cyan)">Vector Search</span></div>
+        <div style="background:var(--ink2);border:1px solid rgba(0,212,255,0.15);border-radius:8px;padding:12px;font-size:12px;color:var(--txt2);line-height:1.6" id="battlecard"></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════ SCREEN 4: PIPELINE INTELLIGENCE ══════════ -->
+<div class="page" id="page-pipeline">
+<div class="pipeline">
+  <div class="pipe-toolbar">
+    <div class="pipe-title">Pipeline Intelligence</div>
+    <div class="pipe-filters">
+      <div class="filt-btn active" onclick="filterPipe('all',this)">All</div>
+      <div class="filt-btn" onclick="filterPipe('risk',this)">At Risk</div>
+      <div class="filt-btn" onclick="filterPipe('high',this)">High Health</div>
+      <div class="filt-btn" onclick="filterPipe('proposal',this)">Proposal</div>
+    </div>
+    <div style="margin-left:auto;font-size:11px;color:var(--txt3);font-family:var(--mono)">Scored by fine-tuned Llama 3.1 · Updated 5:00 AM</div>
+  </div>
+  <div class="pipe-body">
+    <table class="pipe-table" id="pipe-table">
+      <thead>
+        <tr>
+          <th>Account</th>
+          <th>Health</th>
+          <th>ARR</th>
+          <th>Stage</th>
+          <th>Risk flags</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="pipe-tbody"></tbody>
+    </table>
+  </div>
+</div>
+</div>
+
+<!-- ══════════ SCREEN 5: AGENT OBSERVATORY ══════════ -->
+<div class="page" id="page-observatory">
+<div class="observatory">
+
+  <!-- Panel 1: Trace timeline -->
+  <div class="obs-panel">
+    <div class="obs-header">
+      <div class="obs-title">MLflow Trace Timeline</div>
+      <div class="obs-live"><div class="pulse" style="width:5px;height:5px"></div>live</div>
+    </div>
+    <div class="obs-body">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div class="sparkline" id="sparkline"></div>
+        <div style="font-size:11px;color:var(--txt2);font-family:var(--mono)">Quality trend · 14d</div>
+      </div>
+      <div style="display:grid;grid-template-columns:48px 90px 1fr 36px 32px;gap:0;margin-bottom:6px;padding:0 0 6px;border-bottom:1px solid var(--b)">
+        <div style="font-size:10px;font-family:var(--mono);color:var(--txt3)">Time</div>
+        <div style="font-size:10px;font-family:var(--mono);color:var(--txt3)">Agent</div>
+        <div style="font-size:10px;font-family:var(--mono);color:var(--txt3)">Latency</div>
+        <div style="font-size:10px;font-family:var(--mono);color:var(--txt3)">ms</div>
+        <div style="font-size:10px;font-family:var(--mono);color:var(--txt3)">Score</div>
+      </div>
+      <div id="trace-rows"></div>
+    </div>
+  </div>
+
+  <!-- Panel 2: Evaluation metrics -->
+  <div class="obs-panel">
+    <div class="obs-header">
+      <div class="obs-title">Agent Evaluation · AI Judges</div>
+      <div style="font-size:10px;font-family:var(--mono);color:var(--txt3)">Quotient AI · RL loop active</div>
+    </div>
+    <div class="obs-body">
+      <div style="margin-bottom:16px">
+        <div class="rail-section">Current model · v2.3</div>
+        <div class="eval-chart" id="eval-chart"></div>
+      </div>
+      <div>
+        <div class="rail-section">Quality trend · 14 days</div>
+        <div style="display:flex;align-items:flex-end;gap:4px;height:48px;margin-bottom:8px" id="qual-trend"></div>
+        <div style="font-size:11px;color:var(--txt2);font-family:var(--mono)">↑ +0.08 overall since deployment · RL loop active</div>
+      </div>
+      <div style="margin-top:16px">
+        <div class="rail-section">Agent Bricks · optimization run</div>
+        <div style="background:var(--ink3);border:1px solid var(--b);border-radius:6px;padding:10px;font-size:11px;color:var(--txt2);font-family:var(--mono)">
+          Best config: <span style="color:var(--teal)">claude-sonnet-4-6</span><br>
+          Retrieval: top-4, threshold 0.78<br>
+          Cost: $1.84 / 1k calls · Quality: 0.91<br>
+          <span style="color:var(--txt3)">500 synthetic examples · 4h run</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Panel 3: Memory browser -->
+  <div class="obs-panel">
+    <div class="obs-header">
+      <div class="obs-title">Memory Browser · Lakebase</div>
+      <div style="font-size:10px;font-family:var(--mono);color:var(--violet)">24 entries · 3 users</div>
+    </div>
+    <div class="obs-body">
+      <div class="mem-browser" id="mem-browser"></div>
+    </div>
+  </div>
+
+  <!-- Panel 4: Lakewatch + UC -->
+  <div class="obs-panel">
+    <div class="obs-header">
+      <div class="obs-title">Lakewatch · Unity Catalog</div>
+      <div class="obs-live" style="color:var(--teal)"><div class="pulse" style="width:5px;height:5px"></div>0 active alerts</div>
+    </div>
+    <div class="obs-body">
+      <div class="rail-section">Security log · last 24h</div>
+      <div id="lakewatch-log"></div>
+      <div style="margin-top:16px">
+        <div class="rail-section">Unity Catalog · active policies</div>
+        <div style="display:flex;flex-direction:column;gap:5px;font-size:11px;font-family:var(--mono)">
+          <div class="uc-strip"><div class="uc-dot"></div>Row filter · territory_filter · opportunities</div>
+          <div class="uc-strip"><div class="uc-dot"></div>Column mask · mask_personal_email · contacts</div>
+          <div class="uc-strip"><div class="uc-dot"></div>Row filter · ae_profile_filter · memory.ae_profiles</div>
+          <div class="uc-strip"><div class="uc-dot"></div>Lineage · all agent reads tracked</div>
+        </div>
+      </div>
+      <div style="margin-top:16px">
+        <div class="rail-section">Token usage · LLM Gateway</div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <div style="display:flex;align-items:center;gap:8px;font-size:11px;font-family:var(--mono)"><span style="color:var(--txt2);min-width:80px">West team</span><div style="flex:1;height:4px;background:var(--b2);border-radius:2px;overflow:hidden"><div style="width:62%;height:100%;background:var(--cyan);border-radius:2px"></div></div><span style="color:var(--txt3)">62%</span></div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:11px;font-family:var(--mono)"><span style="color:var(--txt2);min-width:80px">East team</span><div style="flex:1;height:4px;background:var(--b2);border-radius:2px;overflow:hidden"><div style="width:38%;height:100%;background:var(--teal);border-radius:2px"></div></div><span style="color:var(--txt3)">38%</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+</div><!-- app-body -->
+
+<script>
+// ── INDUSTRY DATA ─────────────────────────────────────────────────────
+const INDUSTRIES = {
+  finserv: {
+    label: 'financial portfolio',
+    meta: 'Lakeflow ran at 05:00 · 18 financial accounts analyzed · 3 priority actions',
+    kpi: ['$4.2M','71','12','3'],
+    deals: [
+      {icon:'🏦',company:'Meridian Capital Group',vertical:'Financial Services',arr:'$2.4M',health:72,stage:'Proposal',risks:['Champion ghost','Competitor'],stageClass:'stage-proposal'},
+      {icon:'🏦',company:'Vantage Asset Mgmt',vertical:'Wealth Management',arr:'$1.8M',health:85,stage:'Negotiation',risks:['Price sensitivity'],stageClass:'stage-negot'},
+      {icon:'🏦',company:'Axiom Insurance',vertical:'Insurance',arr:'$900K',health:48,stage:'Discovery',risks:['Budget freeze','Multi-vendor'],stageClass:'stage-disco'},
+      {icon:'🏦',company:'Sterling Private Bank',vertical:'Private Banking',arr:'$3.1M',health:91,stage:'Evaluation',risks:[],stageClass:'stage-eval'},
+      {icon:'🏦',company:'ClearPath Brokerage',vertical:'Brokerage',arr:'$650K',health:61,stage:'Discovery',risks:['Champion change'],stageClass:'stage-disco'},
+    ],
+    priority: [
+      {icon:'🏦',bg:'rgba(0,212,255,0.1)',company:'Meridian Capital Group',deal:'$2.4M · Proposal · 52d to close',score:72,scoreClass:'score-mid',risks:['Champion ghost 18d','Snowflake competitive','Budget uncertainty'],action:'Draft follow-up'},
+      {icon:'🏦',bg:'rgba(0,212,255,0.1)',company:'Axiom Insurance',deal:'$900K · Discovery · 90d to close',score:48,scoreClass:'score-low',risks:['Q1 budget freeze','No exec sponsor','3 vendors evaluating'],action:'Escalate to VP'},
+      {icon:'🏦',bg:'rgba(0,212,255,0.1)',company:'ClearPath Brokerage',deal:'$650K · Discovery · 75d to close',score:61,scoreClass:'score-mid',risks:['Champion changed to CTO','Gong sentiment -12%'],action:'Re-map stakeholders'},
+    ],
+    dr:{icon:'🏦',company:'Meridian Capital Group',vertical:'Financial Services · Enterprise',arr:'$2.4M',stage:'Proposal',champion:'M. Torres (VP Eng)',competitor:'Snowflake',gaugeVal:72,gaugeWidth:'72%',
+      msg1:'Deal health: <strong>72/100</strong> — moderate risk. Key signals: champion went quiet 18 days ago (last Gong call: budget review discussion). Competing with Snowflake on data governance narrative. Product usage strong — pipeline builder used daily by 12 engineers.',
+      msg2:'Hi Mike,\n\nYour team\'s been running the pipeline builder daily — clearly building something real. Given your Q2 data migration timeline, wanted to share how Axiom reduced their migration window by 60% using our open format approach.\n\nWorth a 15-min call this week?\n\nBest, Jamie',
+      memContext:'Budget decision deferred to Q2. CFO driving final approval — need exec alignment.',
+      risks:['Champion went quiet · 18d','Snowflake evaluating concurrently','No CFO touchpoint in 45d']},
+    emailSubject:'Your pipeline usage + the Q2 migration window',
+    emailBody:'Hi Mike,\n\nYour engineering team has been running the pipeline builder daily — that\'s a strong signal. Given your Q2 data migration timeline, I wanted to share how a similar firm reduced their migration window by 60% using our open lakehouse format.\n\nWorth a quick 15-min call this week to see if there\'s a fit?\n\nBest, Jamie',
+    emailWC:'112 words ✓',
+    linkedIn:'Mike — saw your team\'s been deep in the pipeline builder. Your Q2 migration push made me think of a similar project at Axiom where we cut the timeline in half. Happy to share the playbook if helpful.',
+    intel1:'"We\'re locked into our Q2 board timeline — migration has to be done before then. Governance is actually our biggest concern." — Mike Torres, Mar 12',
+    intel2:'Axiom Insurance cut migration window 60% with open format approach — same regulatory constraints, similar stack.',
+    callOpening:'Mike, thanks for the time. I know Q2 board prep is coming up fast — I wanted to get 15 minutes to walk through specifically how the open format approach maps to your migration timeline. Can I start there?',
+    callQuestions:['What\'s your specific governance requirement for the Q2 milestone?','Who else is involved in the final vendor decision — is the CFO in the loop?','What does success look like for the migration by board date?'],
+    battlecard:'vs Snowflake: Open Postgres format in Lakebase means no proprietary lock-in. Unity Catalog lineage covers compliance requirements Snowflake can\'t match natively. Lakewatch adds SIEM-grade security monitoring Snowflake has no equivalent for.'
+  },
+  health: {
+    label: 'healthcare pipeline',
+    meta: 'Lakeflow ran at 05:00 · 22 health system accounts analyzed · 4 priority actions',
+    kpi: ['$6.1M','68','15','2'],
+    deals: [
+      {icon:'🏥',company:'NovaCare Health System',vertical:'Health Systems',arr:'$3.2M',health:79,stage:'Proposal',risks:['IT procurement backlog'],stageClass:'stage-proposal'},
+      {icon:'🏥',company:'Meridian Diagnostics',vertical:'Diagnostics',arr:'$1.1M',health:55,stage:'Discovery',risks:['HIPAA compliance concern','Champion change'],stageClass:'stage-disco'},
+      {icon:'🏥',company:'Apex Pharma Research',vertical:'Pharma',arr:'$2.8M',health:88,stage:'Negotiation',risks:[],stageClass:'stage-negot'},
+      {icon:'🏥',company:'ClearVision Radiology',vertical:'Radiology',arr:'$750K',health:42,stage:'Discovery',risks:['Budget freeze','No exec sponsor'],stageClass:'stage-disco'},
+    ],
+    priority: [
+      {icon:'🏥',bg:'rgba(0,229,180,0.1)',company:'NovaCare Health System',deal:'$3.2M · Proposal · 45d to close',score:79,scoreClass:'score-mid',risks:['IT procurement 8-wk delay','HIPAA sign-off pending'],action:'Accelerate compliance docs'},
+      {icon:'🏥',bg:'rgba(0,229,180,0.1)',company:'Meridian Diagnostics',deal:'$1.1M · Discovery · 90d to close',score:55,scoreClass:'score-low',risks:['Champion changed to CISO','Competitor in evaluation'],action:'Re-engage new champion'},
+      {icon:'🏥',bg:'rgba(0,229,180,0.1)',company:'ClearVision Radiology',deal:'$750K · Discovery · 80d to close',score:42,scoreClass:'score-low',risks:['Budget frozen until H2','No exec sponsor identified'],action:'Pause or escalate'},
+    ],
+    dr:{icon:'🏥',company:'NovaCare Health System',vertical:'Health Systems · Enterprise',arr:'$3.2M',stage:'Proposal',champion:'Dr. R. Patel (CIO)',competitor:'Epic',gaugeVal:79,gaugeWidth:'79%',
+      msg1:'Deal health: <strong>79/100</strong>. Strong clinical interest from Dr. Patel. Key risk: IT procurement process adds 8-week delay. HIPAA BAA needs legal sign-off before final approval. Last Gong call highlighted concern about data residency requirements.',
+      msg2:'Dr. Patel,\n\nFollowing up on your data residency question — we\'ve handled this for 3 comparable health systems, all within HIPAA constraints. Happy to connect you with their CIOs.\n\nCan we find 15 min this week?\n\nBest, Jamie',
+      memContext:'HIPAA BAA review in legal — estimated 3-week turnaround. CIO needs peer reference from another health system.',
+      risks:['IT procurement 8-wk delay','HIPAA BAA pending legal','No peer reference provided yet']},
+    emailSubject:'Your data residency question + peer health system intro',
+    emailBody:'Dr. Patel,\n\nYour question about data residency in our last call is exactly what three comparable health systems asked before deployment. All are live within HIPAA constraints — one is happy to do a peer call.\n\nI can arrange that intro in the next few days. Worth a 15 min to align?\n\nBest, Jamie',
+    emailWC:'78 words ✓',
+    linkedIn:'Dr. Patel — the data residency concern you raised is something we\'ve navigated with several health systems. I can connect you with a peer CIO who\'s been through the exact same compliance process. Happy to facilitate.',
+    intel1:'"Data residency is non-negotiable — we\'ve had breaches before and the board is watching everything." — Dr. Patel, CIO, Mar 15',
+    intel2:'St. Mary\'s Health achieved HIPAA compliance and went live in 11 weeks — board presented the outcome as a governance win.',
+    callOpening:'Dr. Patel, I know compliance is top of mind right now. I\'ve arranged something specific for you — a peer CIO from a comparable health system who went through your exact situation. Can I walk you through what made it work for them?',
+    callQuestions:['Where exactly is the HIPAA BAA in your legal review process?','Would a reference call with a peer CIO accelerate the board sign-off?','What\'s the specific data residency requirement — regional or on-prem?'],
+    battlecard:'vs Epic: Databricks is not an EMR replacement — we augment Epic with analytics and AI. Unity Catalog provides HIPAA-grade lineage and access controls. Lakewatch adds security monitoring for PHI access patterns that Epic has no native equivalent for.'
+  },
+  retail: {
+    label: 'retail pipeline',
+    meta: 'Lakeflow ran at 05:00 · 20 retail accounts analyzed · 3 priority actions',
+    kpi: ['$3.8M','74','10','1'],
+    deals: [
+      {icon:'🛍️',company:'Atlas Retail Group',vertical:'Omnichannel Retail',arr:'$2.1M',health:81,stage:'Negotiation',risks:['Price sensitivity'],stageClass:'stage-negot'},
+      {icon:'🛍️',company:'PeakStyle Fashion',vertical:'Fashion & Apparel',arr:'$850K',health:58,stage:'Proposal',risks:['Champion silent','Competitor'],stageClass:'stage-proposal'},
+      {icon:'🛍️',company:'FreshMart Grocery',vertical:'Grocery',arr:'$1.6M',health:67,stage:'Evaluation',risks:['Procurement freeze'],stageClass:'stage-eval'},
+      {icon:'🛍️',company:'Vertex Luxury',vertical:'Luxury Goods',arr:'$900K',health:44,stage:'Discovery',risks:['No sponsor','Budget unclear'],stageClass:'stage-disco'},
+    ],
+    priority: [
+      {icon:'🛍️',bg:'rgba(255,184,48,0.1)',company:'PeakStyle Fashion',deal:'$850K · Proposal · 60d to close',score:58,scoreClass:'score-low',risks:['Champion silent 22d','Google BigQuery competitive','Seasonal buying cycle risk'],action:'Re-engage champion'},
+      {icon:'🛍️',bg:'rgba(255,184,48,0.1)',company:'FreshMart Grocery',deal:'$1.6M · Evaluation · 40d to close',score:67,scoreClass:'score-mid',risks:['Procurement freeze Q1','3 vendors shortlisted'],action:'Accelerate eval'},
+      {icon:'🛍️',bg:'rgba(255,184,48,0.1)',company:'Vertex Luxury',deal:'$900K · Discovery · 90d to close',score:44,scoreClass:'score-low',risks:['No exec sponsor','Budget approval path unclear'],action:'Map stakeholders'},
+    ],
+    dr:{icon:'🛍️',company:'PeakStyle Fashion',vertical:'Fashion & Apparel · Mid-Market',arr:'$850K',stage:'Proposal',champion:'L. Chen (VP Data)',competitor:'Google BigQuery',gaugeVal:58,gaugeWidth:'58%',
+      msg1:'Deal health: <strong>58/100</strong> — elevated risk. Champion Lisa Chen has gone quiet for 22 days. Seasonal buying cycle creates urgency — fashion retail typically freezes tech spend during spring buying season (April–May). Competing with Google BigQuery.',
+      msg2:'Lisa,\n\nKnow this is peak buying season — keeping it brief. Your team\'s personalization initiative has a tight window before the season freeze. One number: 34% lift in basket size for a comparable retailer using our recommendation engine.\n\nQuick call?\n\nBest, Jamie',
+      memContext:'Spring buying cycle freeze starts April — decision needed by March 31 or delayed to H2. Lisa mentioned personalization ROI as the key board metric.',
+      risks:['Champion silent 22d','Season freeze Apr deadline','BigQuery evaluating concurrently']},
+    emailSubject:'Personalization ROI before the season freeze',
+    emailBody:'Lisa,\n\nKnow this is your busiest stretch. One number before the season freeze: a comparable fashion retailer saw 34% basket size lift using our recommendation engine — 6-week implementation.\n\nIf the timing works, happy to share the playbook in a quick call.\n\nBest, Jamie',
+    emailWC:'58 words ✓',
+    linkedIn:'Lisa — personalization ROI before the buying season freeze. A comparable fashion retailer hit 34% basket lift in 6 weeks. Happy to share what they did differently. Let me know if worth a chat.',
+    intel1:'"Our board metric is basket size — if you can move that number, the conversation gets much easier." — Lisa Chen, VP Data, Feb 28',
+    intel2:'StyleCo Fashion achieved 34% basket size lift in 6 weeks using Mosaic AI recommendation models — same stack, same seasonal constraints.',
+    callOpening:'Lisa, I know the clock is ticking before the buying season freeze. I want to get specific: a retailer in your exact position — same product mix, same seasonal constraints — hit 34% basket lift. Can I walk you through what made that happen in 6 weeks?',
+    callQuestions:['What\'s the internal approval path before the April freeze?','Is basket size the primary board metric, or are there secondary metrics that matter?','What would the personalization initiative need to show in a pilot to get full approval?'],
+    battlecard:'vs Google BigQuery: Mosaic AI gives you recommendation models and feature engineering in the same platform as your data — no data movement. Unity Catalog lineage satisfies retail compliance for customer data. Lakewatch monitors for PII access patterns that BigQuery has no equivalent for.'
+  },
+  mfg: {
+    label: 'manufacturing pipeline',
+    meta: 'Lakeflow ran at 05:00 · 15 manufacturing accounts analyzed · 2 priority actions',
+    kpi: ['$5.7M','69','8','2'],
+    deals: [
+      {icon:'🏭',company:'Orion Industrial Systems',vertical:'Discrete Manufacturing',arr:'$3.4M',health:76,stage:'Proposal',risks:['Long procurement cycle'],stageClass:'stage-proposal'},
+      {icon:'🏭',company:'Vertex Precision Parts',vertical:'Precision Manufacturing',arr:'$1.2M',health:51,stage:'Discovery',risks:['Champion change','Competitor'],stageClass:'stage-disco'},
+      {icon:'🏭',company:'Cascade Automation',vertical:'Industrial Automation',arr:'$2.1M',health:83,stage:'Negotiation',risks:[],stageClass:'stage-negot'},
+    ],
+    priority: [
+      {icon:'🏭',bg:'rgba(167,139,250,0.1)',company:'Orion Industrial Systems',deal:'$3.4M · Proposal · 65d to close',score:76,scoreClass:'score-mid',risks:['18-wk procurement cycle','No digital twin validation','SAP integration concern'],action:'Accelerate POC'},
+      {icon:'🏭',bg:'rgba(167,139,250,0.1)',company:'Vertex Precision Parts',deal:'$1.2M · Discovery · 85d to close',score:51,scoreClass:'score-low',risks:['Champion changed to COO','Azure ML competing'],action:'Re-engage COO'},
+    ],
+    dr:{icon:'🏭',company:'Orion Industrial Systems',vertical:'Discrete Manufacturing · Enterprise',arr:'$3.4M',stage:'Proposal',champion:'K. Yamamoto (CDO)',competitor:'Azure ML',gaugeVal:76,gaugeWidth:'76%',
+      msg1:'Deal health: <strong>76/100</strong>. Strong technical interest from CDO. Key blocker: 18-week procurement cycle and pending SAP integration validation. Last Gong call: CDO asked specifically about digital twin support and real-time OEE monitoring.',
+      msg2:'Kenji,\n\nFollowing up on the SAP integration question — we\'ve validated this with 3 automotive manufacturers, including one running your exact SAP version. Happy to connect you with their team.\n\n15 min this week?\n\nBest, Jamie',
+      memContext:'SAP S/4HANA validation is the technical gate. CDO wants OEE monitoring demo before board review in 6 weeks.',
+      risks:['18-wk procurement cycle','SAP integration unvalidated','OEE demo not scheduled']},
+    emailSubject:'SAP validation + OEE demo before your board review',
+    emailBody:'Kenji,\n\nYour SAP integration question has a concrete answer — 3 automotive manufacturers validated this on your exact SAP version. One is happy to do a peer call.\n\nAlso want to get you an OEE demo before your board review. 15 min this week?\n\nBest, Jamie',
+    emailWC:'64 words ✓',
+    linkedIn:'Kenji — the SAP integration question you raised is something we\'ve validated with manufacturers on your exact SAP version. Happy to connect you with a peer CDO who\'s been through it. Let me know.',
+    intel1:'"SAP is the backbone — if this doesn\'t integrate cleanly with S/4HANA, we can\'t move forward regardless of the analytics story." — Kenji Yamamoto, CDO, Mar 10',
+    intel2:'Apex Motors validated Databricks SAP S/4HANA integration in 3 weeks — OEE visibility went live within 8 weeks of contract.',
+    callOpening:'Kenji, I\'ve lined up something specific: a peer CDO at Apex Motors who ran your exact SAP version through the same integration validation. Three weeks to validate, eight weeks to live OEE. Can I walk you through their path?',
+    callQuestions:['What\'s the specific SAP module the integration needs to touch — PP, QM, PM?','Who from your IT team needs to be in the integration validation call?','What does the board review timeline look like — do we need the demo in 4 or 6 weeks?'],
+    battlecard:'vs Azure ML: Databricks runs natively on Azure AND gives you open formats — no Microsoft lock-in. Unity Catalog provides manufacturing-grade lineage for ISO compliance. Lakewatch monitors for OT/IT security anomalies that Azure ML has no equivalent for.'
+  },
+  tech: {
+    label: 'technology pipeline',
+    meta: 'Lakeflow ran at 05:00 · 28 tech accounts analyzed · 5 priority actions',
+    kpi: ['$8.4M','77','18','4'],
+    deals: [
+      {icon:'💻',company:'Nexus Cloud Platforms',vertical:'Cloud Infrastructure',arr:'$4.2M',health:83,stage:'Negotiation',risks:['Price pressure'],stageClass:'stage-negot'},
+      {icon:'💻',company:'Axiom SaaS Co',vertical:'B2B SaaS',arr:'$1.9M',health:62,stage:'Proposal',risks:['Champion change','Multi-vendor eval'],stageClass:'stage-proposal'},
+      {icon:'💻',company:'Quantum AI Labs',vertical:'AI/ML',arr:'$2.3M',health:71,stage:'Evaluation',risks:['DIY build vs buy'],stageClass:'stage-eval'},
+      {icon:'💻',company:'Cascade DevTools',vertical:'Developer Tooling',arr:'$800K',health:45,stage:'Discovery',risks:['Budget freeze','No sponsor'],stageClass:'stage-disco'},
+    ],
+    priority: [
+      {icon:'💻',bg:'rgba(0,212,255,0.1)',company:'Quantum AI Labs',deal:'$2.3M · Evaluation · 50d to close',score:71,scoreClass:'score-mid',risks:['Build vs buy debate','OSS alternative viable','Technical champion skeptical'],action:'Strengthen technical POC'},
+      {icon:'💻',bg:'rgba(0,212,255,0.1)',company:'Axiom SaaS Co',deal:'$1.9M · Proposal · 55d to close',score:62,scoreClass:'score-mid',risks:['Champion changed to new CTO','Databricks vs Snowflake eval'],action:'Engage new CTO'},
+      {icon:'💻',bg:'rgba(0,212,255,0.1)',company:'Cascade DevTools',deal:'$800K · Discovery · 90d to close',score:45,scoreClass:'score-low',risks:['Budget frozen H1','No exec sponsor','OSS-first culture'],action:'Pause and re-qualify'},
+    ],
+    dr:{icon:'💻',company:'Quantum AI Labs',vertical:'AI/ML · Scale-up',arr:'$2.3M',stage:'Evaluation',champion:'A. Sharma (CTO)',competitor:'OSS stack',gaugeVal:71,gaugeWidth:'71%',
+      msg1:'Deal health: <strong>71/100</strong>. Strong technical interest but build-vs-buy debate is real. CTO Aditya Sharma is evaluating a self-hosted MLflow + Ray stack. Last Gong call: team expressed concern about governance and compliance overhead of OSS.',
+      msg2:'Aditya,\n\nYou can build the OSS stack — your team is clearly capable. The question is engineering time vs. focus. Governance and compliance overhead for enterprise OSS typically runs 2-3 engineers for 6 months before you\'re production-ready.\n\n15 min to compare paths?\n\nBest, Jamie',
+      memContext:'CTO is technically strong — OSS build is credible. Key message: governance + compliance overhead is the hidden cost of DIY. Aditya responds to data, not feature lists.',
+      risks:['Build vs buy debate active','OSS stack viable for their team','Compliance overhead not yet surfaced']},
+    emailSubject:'The hidden cost of the OSS stack (engineering hours)',
+    emailBody:'Aditya,\n\nYour team can absolutely build the MLflow + Ray stack. The question is what it costs in engineering focus.\n\nTypically: 2-3 senior engineers, 6 months before production-ready governance. We\'ve quantified this for 4 similar AI teams.\n\n15 min to compare paths honestly?\n\nBest, Jamie',
+    emailWC:'69 words ✓',
+    linkedIn:'Aditya — the OSS build is credible for a team like yours. The hidden cost is governance and compliance overhead: typically 2-3 engineers for 6 months. Happy to share the breakdown from 4 comparable AI teams who made the same analysis.',
+    intel1:'"We\'re leaning OSS — our engineers are strong enough to build it. My concern is long-term maintenance and compliance as we scale." — Aditya Sharma, CTO, Mar 8',
+    intel2:'NeuralEdge AI switched from self-hosted MLflow to Databricks after 8 months — saved 3 FTE and accelerated model governance compliance by 5 months.',
+    callOpening:'Aditya, I want to be direct with you — your team can build the OSS stack, no question. I want to spend 15 minutes sharing what comparable AI teams actually experienced: the real engineering cost, the governance timeline, and where they\'d make the same decision again. Does that sound worth it?',
+    callQuestions:['How many engineers would own the OSS stack long-term — and what would they deprioritize?','What\'s your compliance requirement as you scale — SOC 2, enterprise contracts?','What\'s the timeline pressure — is there a board or customer milestone driving this?'],
+    battlecard:'vs OSS (MLflow + Ray): We ARE MLflow — Databricks built and maintains it. You get enterprise governance, Unity Catalog lineage, and Lakewatch security monitoring on top of the OSS you already know. The question is whether you want to run the infrastructure or build with it.'
+  },
+  energy: {
+    label: 'energy pipeline',
+    meta: 'Lakeflow ran at 05:00 · 12 energy accounts analyzed · 2 priority actions',
+    kpi: ['$7.2M','65','6','1'],
+    deals: [
+      {icon:'⚡',company:'Apex Energy Solutions',vertical:'Renewables',arr:'$4.1M',health:74,stage:'Proposal',risks:['Long regulatory cycle'],stageClass:'stage-proposal'},
+      {icon:'⚡',company:'GridTech Utilities',vertical:'Electric Utility',arr:'$2.8M',health:58,stage:'Discovery',risks:['OT/IT security concern','Champion change'],stageClass:'stage-disco'},
+      {icon:'⚡',company:'Cascade Oil & Gas',vertical:'Oil & Gas',arr:'$1.4M',health:82,stage:'Negotiation',risks:[],stageClass:'stage-negot'},
+    ],
+    priority: [
+      {icon:'⚡',bg:'rgba(255,184,48,0.1)',company:'Apex Energy Solutions',deal:'$4.1M · Proposal · 70d to close',score:74,scoreClass:'score-mid',risks:['NERC CIP compliance gap','Regulatory timeline 12+ weeks','No CISO alignment'],action:'Schedule compliance workshop'},
+      {icon:'⚡',bg:'rgba(255,184,48,0.1)',company:'GridTech Utilities',deal:'$2.8M · Discovery · 95d to close',score:58,scoreClass:'score-low',risks:['Champion changed to new CISO','OT/IT convergence concern'],action:'Re-engage with Lakewatch story'},
+    ],
+    dr:{icon:'⚡',company:'Apex Energy Solutions',vertical:'Renewables · Enterprise',arr:'$4.1M',stage:'Proposal',champion:'T. Okonkwo (CDO)',competitor:'OSIsoft/AVEVA',gaugeVal:74,gaugeWidth:'74%',
+      msg1:'Deal health: <strong>74/100</strong>. Strong sponsorship from CDO Taiwo Okonkwo. Key blocker: NERC CIP compliance validation not started. OT/IT convergence is the technical narrative — Lakewatch is the differentiator. Competing with OSIsoft/AVEVA.',
+      msg2:'Taiwo,\n\nThe NERC CIP compliance question has a path — we\'ve navigated it with 2 utilities. Lakewatch specifically addresses the OT/IT security monitoring gap that OSIsoft doesn\'t cover.\n\n15 min to map out the compliance timeline?\n\nBest, Jamie',
+      memContext:'NERC CIP compliance is the regulatory gate. CDO needs CISO aligned before board sign-off. Lakewatch OT/IT monitoring is the strongest differentiator vs AVEVA.',
+      risks:['NERC CIP compliance not started','No CISO alignment yet','12-wk regulatory timeline']},
+    emailSubject:'NERC CIP compliance path + OT/IT security gap',
+    emailBody:'Taiwo,\n\nThe NERC CIP compliance validation has a defined path — we\'ve run it with 2 utilities in under 10 weeks. And Lakewatch covers the OT/IT security monitoring gap that\'s typically the compliance sticking point.\n\nWorth a 15-min call to map the timeline?\n\nBest, Jamie',
+    emailWC:'67 words ✓',
+    linkedIn:'Taiwo — the NERC CIP compliance path for your OT/IT convergence is something we\'ve navigated with utilities in under 10 weeks. Lakewatch covers the security monitoring gap that typically stalls these approvals. Happy to share the playbook.',
+    intel1:'"NERC CIP is non-negotiable — we\'ve had FERC audits before. The OT/IT security monitoring gap is what keeps me up at night." — Taiwo Okonkwo, CDO, Mar 5',
+    intel2:'Western Power achieved NERC CIP compliance with Databricks in 9 weeks — Lakewatch OT security monitoring satisfied the FERC audit requirement.',
+    callOpening:'Taiwo, I want to focus on the NERC CIP path specifically — I have the exact compliance timeline from Western Power: 9 weeks, FERC audit passed, Lakewatch covered the OT monitoring gap. Can I walk you through what that looked like?',
+    callQuestions:['Where does NERC CIP compliance sit in your current roadmap — is there a FERC audit date?','Is your CISO in the loop on the OT/IT convergence initiative?','What\'s the OT data source — historian, SCADA, or both?'],
+    battlecard:'vs OSIsoft/AVEVA: Databricks provides the analytics and AI layer on top of your historian data — we\'re not replacing OSIsoft. Lakewatch adds SIEM-grade OT/IT security monitoring that AVEVA has no equivalent for. Unity Catalog provides NERC CIP-grade lineage for regulatory compliance.'
+  }
+};
+
+let currentIndustry = 'finserv';
+let selectedCard = 0;
+
+function setIndustry(id, el) {
+  currentIndustry = id;
+  document.querySelectorAll('.ind-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  renderAll();
+}
+
+function renderAll() {
+  const d = INDUSTRIES[currentIndustry];
+  // Briefing
+  document.getElementById('industry-label').textContent = d.label;
+  document.getElementById('brief-meta').textContent = d.meta;
+  const kpiIds=['kpi1-val','kpi2-val','kpi3-val','kpi4-val'];
+  kpiIds.forEach((id,i)=>document.getElementById(id).textContent=d.kpi[i]);
+  renderPriorityCards(d);
+  renderDealRoom(d);
+  renderStudio(d);
+  renderPipeline(d);
+}
+
+function renderPriorityCards(d) {
+  const container = document.getElementById('priority-cards');
+  container.innerHTML = d.priority.map((p,i) => `
+    <div class="pcard ${i===selectedCard?'selected':''}" onclick="selectCard(${i})">
+      <div class="pcard-top">
+        <div class="pcard-industry" style="background:${p.bg}">${p.icon}</div>
+        <div class="pcard-meta">
+          <div class="pcard-company">${p.company}</div>
+          <div class="pcard-deal">${p.deal}</div>
+        </div>
+        <div class="pcard-score"><div class="score-ring ${p.scoreClass}">${p.score}</div></div>
+      </div>
+      <div class="risk-flags">${p.risks.map(r=>`<span class="rflag ${r.includes('Champion')||r.includes('freeze')||r.includes('silent')||r.includes('No ')?'red':r.includes('Competitor')||r.includes('competitive')||r.includes('evaluating')?'amber':'cyan'}">${r}</span>`).join('')}</div>
+      <div class="pcard-action">
+        <button class="btn-primary" onclick="showTab('dealroom',document.querySelectorAll('.tb-tab')[1]);event.stopPropagation()">${p.action} →</button>
+        <button class="btn-ghost" onclick="event.stopPropagation()">View intel</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function selectCard(i) {
+  selectedCard = i;
+  renderPriorityCards(INDUSTRIES[currentIndustry]);
+}
+
+function renderDealRoom(d) {
+  const dr = d.dr;
+  document.getElementById('dr-icon').textContent = dr.icon;
+  document.getElementById('dr-company').textContent = dr.company;
+  document.getElementById('dr-vertical').textContent = dr.vertical;
+  document.getElementById('dr-arr').textContent = dr.arr;
+  document.getElementById('dr-stage').textContent = dr.stage;
+  document.getElementById('dr-champion').textContent = dr.champion;
+  document.getElementById('dr-competitor').textContent = dr.competitor;
+  document.getElementById('dr-gauge-val').textContent = dr.gaugeVal;
+  document.getElementById('dr-gauge-fill').style.width = dr.gaugeWidth;
+  const gaugeColor = dr.gaugeVal >= 80 ? 'var(--teal)' : dr.gaugeVal >= 60 ? 'var(--amber)' : 'var(--rose)';
+  document.getElementById('dr-gauge-fill').style.borderColor = gaugeColor;
+  document.getElementById('dr-gauge-val').style.color = gaugeColor;
+  document.getElementById('dr-msg1').innerHTML = dr.msg1;
+  document.getElementById('dr-msg2').textContent = dr.msg2;
+  document.getElementById('dr-mem-context').innerHTML = `<strong>Budget/timeline</strong><br>${dr.memContext}`;
+  document.getElementById('dr-mem-competitor').textContent = dr.competitor;
+  const riskContainer = document.getElementById('dr-risks');
+  riskContainer.innerHTML = dr.risks.map(r=>`<div class="rflag red" style="display:block;margin-bottom:4px">⚠ ${r}</div>`).join('');
+}
+
+function renderStudio(d) {
+  document.getElementById('email-subject').textContent = d.emailSubject;
+  document.getElementById('email-body').innerHTML = d.emailBody.replace(/\n/g,'<br>');
+  document.getElementById('email-wordcount').textContent = d.emailWC;
+  document.getElementById('linkedin-body').innerHTML = d.linkedIn;
+  document.getElementById('intel1').textContent = d.intel1;
+  document.getElementById('intel2').textContent = d.intel2;
+  document.getElementById('call-opening').textContent = d.callOpening;
+  document.getElementById('call-questions').innerHTML = d.callQuestions.map(q=>`<div style="background:var(--ink2);border:1px solid var(--b);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--txt2)">→ ${q}</div>`).join('');
+  document.getElementById('battlecard').innerHTML = d.battlecard.replace(/vs ([^:]+):/g,'<strong style="color:var(--cyan)">vs $1:</strong>');
+}
+
+function renderPipeline(d) {
+  const tbody = document.getElementById('pipe-tbody');
+  tbody.innerHTML = d.deals.map((deal,i) => {
+    const barColor = deal.health>=80?'var(--teal)':deal.health>=60?'var(--amber)':'var(--rose)';
+    const scoreColor = deal.health>=80?'var(--teal)':deal.health>=60?'var(--amber)':'var(--rose)';
+    return `<tr class="${i===0?'selected-row':''}">
+      <td><div class="company-cell"><div class="comp-icon" style="background:rgba(255,255,255,0.05)">${deal.icon}</div><div><div class="comp-name">${deal.company}</div><div class="comp-vertical">${deal.vertical}</div></div></div></td>
+      <td><div class="score-bar"><div class="bar-track"><div class="bar-fill" style="width:${deal.health}%;background:${barColor}"></div></div><span class="bar-val" style="color:${scoreColor}">${deal.health}</span></div></td>
+      <td><div class="arr-cell">${deal.arr}</div></td>
+      <td><span class="stage-pill ${deal.stageClass}">${deal.stage}</span></td>
+      <td><div style="display:flex;gap:4px;flex-wrap:wrap">${deal.risks.map(r=>`<span class="rflag ${r.includes('freeze')||r.includes('change')||r.includes('silent')||r.includes('No ')?'red':'amber'}">${r}</span>`).join('')}</div></td>
+      <td><div class="action-cell"><button class="btn-primary" style="padding:5px 10px;font-size:10px" onclick="showTab('dealroom',document.querySelectorAll('.tb-tab')[1])">Open →</button><button class="btn-ghost" style="padding:5px 10px;font-size:10px" onclick="showTab('studio',document.querySelectorAll('.tb-tab')[2])">Draft</button></div></td>
+    </tr>`;
+  }).join('');
+}
+
+// Observatory data
+function renderObservatory() {
+  // Sparkline
+  const vals = [72,74,76,75,78,79,80,81,80,82,83,85,87,88];
+  document.getElementById('sparkline').innerHTML = vals.map((v,i) =>
+    `<div class="spark-bar" style="height:${(v-70)*4}px;background:${i===vals.length-1?'var(--teal)':'var(--teal)'};opacity:${0.3+i/vals.length*0.7}"></div>`
+  ).join('');
+
+  // Qual trend
+  document.getElementById('qual-trend').innerHTML = vals.map((v,i) =>
+    `<div style="flex:1;border-radius:2px;background:var(--teal);height:${(v-70)*4}px;opacity:${0.3+i/vals.length*0.7}"></div>`
+  ).join('');
+
+  // Trace rows
+  const traces = [
+    {time:'09:41',agent:'research',ms:1240,score:'0.94'},
+    {time:'09:41',agent:'scoring',ms:890,score:'0.91'},
+    {time:'09:41',agent:'outreach',ms:2100,score:'0.88'},
+    {time:'09:41',agent:'memory',ms:67,score:'—'},
+    {time:'09:38',agent:'research',ms:1180,score:'0.93'},
+    {time:'09:38',agent:'outreach',ms:1980,score:'0.86'},
+    {time:'09:35',agent:'scoring',ms:920,score:'0.90'},
+    {time:'09:33',agent:'memory',ms:54,score:'—'},
+  ];
+  document.getElementById('trace-rows').innerHTML = traces.map(t => `
+    <div class="trace-row">
+      <div class="tr-time">${t.time}</div>
+      <div class="tr-agent ${t.agent}">${t.agent}</div>
+      <div class="tr-bar-wrap"><div class="tr-bar ${t.agent}" style="width:${Math.min(t.ms/25,100)}%"></div></div>
+      <div class="tr-ms">${t.ms}</div>
+      <div class="tr-score" style="color:${t.score==='—'?'var(--txt3)':'var(--teal)'}">${t.score}</div>
+    </div>
+  `).join('');
+
+  // Eval chart
+  const evals = [
+    {label:'Groundedness',val:94,color:'var(--teal)'},
+    {label:'Personalization',val:88,color:'var(--teal)'},
+    {label:'Retrieval precision',val:81,color:'var(--amber)'},
+    {label:'Safety',val:99,color:'var(--teal)'},
+    {label:'Relevance',val:87,color:'var(--teal)'},
+  ];
+  document.getElementById('eval-chart').innerHTML = evals.map(e => `
+    <div class="eval-metric-row">
+      <div class="eval-label">${e.label}</div>
+      <div class="eval-track"><div class="eval-fill" style="width:${e.val}%;background:${e.color}"></div></div>
+      <div class="eval-val" style="color:${e.color}">${e.val/100}</div>
+    </div>
+  `).join('');
+
+  // Memory browser
+  const mems = [
+    {type:'pref',typelabel:'PREF',content:'<strong>email_max_words</strong> · 120 · stated 3 sessions ago',age:'5 days ago'},
+    {type:'account',typelabel:'ACCOUNT',content:'<strong>Meridian Capital</strong> · Champion changed Feb 2026 · Sarah Chen → Mike Torres',age:'2 days ago'},
+    {type:'decision',typelabel:'DECISION',content:'Recommended ROI angle for Axiom · AE <strong>modified</strong> to lead with compliance story',age:'3 days ago'},
+    {type:'pref',typelabel:'PREF',content:'<strong>preferred_cta</strong> · "15-min call" · consistent across 5 sessions',age:'7 days ago'},
+    {type:'account',typelabel:'ACCOUNT',content:'<strong>PeakStyle Fashion</strong> · Budget freeze Apr–May seasonal · revisit June',age:'1 day ago'},
+    {type:'decision',typelabel:'DECISION',content:'Recommended BigQuery comparison · AE <strong>accepted</strong> · deal health improved +8',age:'4 days ago'},
+  ];
+  document.getElementById('mem-browser').innerHTML = mems.map(m => `
+    <div class="mb-entry">
+      <div class="mb-type ${m.type}">${m.typelabel}</div>
+      <div><div class="mb-content">${m.content}</div><div class="mb-age">${m.age}</div></div>
+    </div>
+  `).join('');
+
+  // Lakewatch
+  const lw = [
+    {sev:'ok',sevlabel:'CLEAR',msg:'<strong>Outreach volume</strong> · West team within normal range (8 drafts today)',time:'5 min ago'},
+    {sev:'ok',sevlabel:'CLEAR',msg:'<strong>Data access</strong> · All reads within territory scope · UC row filter active',time:'12 min ago'},
+    {sev:'info',sevlabel:'INFO',msg:'<strong>Memory extraction</strong> · 8 new facts written to Lakebase · async session close',time:'28 min ago'},
+    {sev:'warn',sevlabel:'WARN',msg:'<strong>Retrieval latency</strong> · Vector Search p95 at 340ms · monitoring threshold 300ms',time:'1h ago'},
+    {sev:'ok',sevlabel:'CLEAR',msg:'<strong>PII check</strong> · No personal email addresses in agent outputs · mask applied',time:'2h ago'},
+    {sev:'ok',sevlabel:'CLEAR',msg:'<strong>Prompt injection scan</strong> · 0 suspicious patterns in last 100 inputs',time:'3h ago'},
+  ];
+  document.getElementById('lakewatch-log').innerHTML = lw.map(l => `
+    <div class="lw-entry">
+      <div class="lw-sev ${l.sev}">${l.sevlabel}</div>
+      <div class="lw-msg">${l.msg}</div>
+      <div class="lw-time">${l.time}</div>
+    </div>
+  `).join('');
+}
+
+// Tab navigation
+function showTab(id, el) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tb-tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('page-'+id).classList.add('active');
+  if(el) el.classList.add('active');
+}
+
+// Pipeline filter
+function filterPipe(f, el) {
+  document.querySelectorAll('.filt-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  const d = INDUSTRIES[currentIndustry];
+  let deals = d.deals;
+  if(f==='risk') deals = deals.filter(x=>x.health<65);
+  if(f==='high') deals = deals.filter(x=>x.health>=80);
+  if(f==='proposal') deals = deals.filter(x=>x.stage==='Proposal');
+  renderPipelineDeals(deals);
+}
+
+function renderPipelineDeals(deals) {
+  const tbody = document.getElementById('pipe-tbody');
+  tbody.innerHTML = deals.map((deal,i) => {
+    const barColor = deal.health>=80?'var(--teal)':deal.health>=60?'var(--amber)':'var(--rose)';
+    return `<tr>
+      <td><div class="company-cell"><div class="comp-icon" style="background:rgba(255,255,255,0.05)">${deal.icon}</div><div><div class="comp-name">${deal.company}</div><div class="comp-vertical">${deal.vertical}</div></div></div></td>
+      <td><div class="score-bar"><div class="bar-track"><div class="bar-fill" style="width:${deal.health}%;background:${barColor}"></div></div><span class="bar-val" style="color:${barColor}">${deal.health}</span></div></td>
+      <td><div class="arr-cell">${deal.arr}</div></td>
+      <td><span class="stage-pill ${deal.stageClass}">${deal.stage}</span></td>
+      <td><div style="display:flex;gap:4px;flex-wrap:wrap">${deal.risks.map(r=>`<span class="rflag ${r.includes('freeze')||r.includes('change')||r.includes('silent')||r.includes('No ')?'red':'amber'}">${r}</span>`).join('')}</div></td>
+      <td><div class="action-cell"><button class="btn-primary" style="padding:5px 10px;font-size:10px" onclick="showTab('dealroom',document.querySelectorAll('.tb-tab')[1])">Open →</button><button class="btn-ghost" style="padding:5px 10px;font-size:10px">Draft</button></div></td>
+    </tr>`;
+  }).join('');
+}
+
+// Chat
+const chatReplies = [
+  "The champion silence is the biggest risk right now. Based on the Gong transcript from 18 days ago, Mike ended the call mentioning a Q2 board review. I'd recommend framing the follow-up around that specific deadline rather than leading with product features.",
+  "Memory applied: keeping this under 120 words as you prefer. Draft updated to lead with the migration timeline angle — the Gong transcript shows this is Mike's stated priority.",
+  "Competitive intel retrieved: Snowflake's main pitch in this sector is their data sharing feature. Your strongest counter is open format in Lakebase — no proprietary lock-in — plus Lakewatch security monitoring that Snowflake has no equivalent for.",
+  "Risk assessment updated. With the CFO now involved, I'd recommend scheduling an exec-to-exec call. Checkpoint saved to this thread — we can branch from this point if you want to try a different angle."
+];
+let replyIdx = 0;
+
+function sendChat() {
+  const input = document.getElementById('chat-input');
+  const val = input.value.trim();
+  if(!val) return;
+  const messages = document.getElementById('chat-messages');
+  messages.innerHTML += `<div class="msg user"><div class="msg-bubble">${val}</div><div class="msg-meta">Short-term memory · thread active</div></div>`;
+  input.value = '';
+  setTimeout(()=>{
+    const reply = chatReplies[replyIdx % chatReplies.length];
+    replyIdx++;
+    messages.innerHTML += `<div class="msg agent"><div class="msg-bubble">${reply}</div><div class="msg-meta">Research Agent · checkpoint saved · ${Math.floor(800+Math.random()*800)}ms</div><div class="msg-qual"><span class="rflag teal">grounded</span><span class="rflag cyan">memory applied</span></div></div>`;
+    messages.scrollTop = messages.scrollHeight;
+  }, 900);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function branchConvo() {
+  const pill = document.getElementById('thread-pill');
+  const newId = Math.random().toString(36).slice(2,8);
+  pill.textContent = `branch · ${newId}`;
+  pill.style.background = 'rgba(0,229,180,0.15)';
+  pill.style.borderColor = 'rgba(0,229,180,0.3)';
+  pill.style.color = 'var(--teal)';
+  const messages = document.getElementById('chat-messages');
+  messages.innerHTML += `<div class="msg agent" style="align-self:center"><div class="msg-bubble" style="background:var(--teal2);border-color:rgba(0,229,180,0.2);font-size:11px;font-family:var(--mono)">⎇ Branched from checkpoint · original thread preserved · try a different angle</div></div>`;
+  messages.scrollTop = messages.scrollHeight;
+}
+
+// Init
+renderAll();
+renderObservatory();
+</script>
+</body>
+</html>

@@ -1,18 +1,21 @@
 """
-GTM Deal Intelligence Agent — Standalone agent definition with memory.
+GTM Deal Intelligence Agent — Standalone agent definition with Lakebase memory.
 
 This file is loaded by MLflow Model Serving. It contains ONLY the agent
 definition and set_model() — NO logging, testing, or deployment code.
 
 Memory Architecture:
-  Short-term: LangGraph MemorySaver (in-process, multi-turn within endpoint lifetime)
-  Long-term:  Delta tables queried via SQL Statement Execution API (cross-session)
+  Short-term: Lakebase CheckpointSaver (cross-replica session persistence)
+              Falls back to MemorySaver if Lakebase not available
+  Long-term:  Lakebase memory tools — recall_lakebase_memory / store_lakebase_memory
+              Backed by Delta tables queried via SQL Statement Execution API
 
-Databricks tech: LangGraph + ChatDatabricks + UC Functions + Vector Search + SQL API
+Databricks tech: LangGraph + ChatDatabricks + UC Functions + Vector Search + Lakebase + SQL API
 """
 
 import json
 import logging
+import re
 import time
 import uuid
 
@@ -28,22 +31,33 @@ from mlflow.types.responses import (
 from databricks_langchain import ChatDatabricks, UCFunctionToolkit, VectorSearchRetrieverTool
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
+from langchain_core.tools import tool
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt.tool_node import ToolNode
-from langgraph.checkpoint.memory import MemorySaver
 from typing import Annotated, Generator, Sequence, TypedDict
 
 logger = logging.getLogger(__name__)
 
-# ── Optional: SQL API for long-term memory ──────────────────────────────
+# ── Lakebase CheckpointSaver (with MemorySaver fallback) ──────────────────
+try:
+    from databricks.agents.lakebase import CheckpointSaver
+    _checkpointer = CheckpointSaver()
+    _LAKEBASE_CHECKPOINT = True
+    logger.info("Lakebase CheckpointSaver loaded — cross-replica session memory active")
+except (ImportError, Exception) as e:
+    from langgraph.checkpoint.memory import MemorySaver
+    _checkpointer = MemorySaver()
+    _LAKEBASE_CHECKPOINT = False
+    logger.info("Lakebase CheckpointSaver not available (%s) — using MemorySaver fallback", e)
+
+# ── SQL API for Lakebase memory tables ────────────────────────────────────
 try:
     from databricks.sdk import WorkspaceClient
-
     _SQL_AVAILABLE = True
 except ImportError:
     _SQL_AVAILABLE = False
-    logger.info("databricks.sdk not available — long-term memory disabled")
+    logger.info("databricks.sdk not available — Lakebase memory tools disabled")
 
 # ── Configuration ────────────────────────────────────────────────────────
 CATALOG = "users"
@@ -55,24 +69,29 @@ SQL_WAREHOUSE_ID = "75fd8278393d07eb"  # Shared Endpoint on e2-demo-west
 SYSTEM_PROMPT = """You are an expert GTM Deal Intelligence assistant for B2B SaaS account executives.
 
 You have access to:
+- **Lakebase Memory** via recall_lakebase_memory — ALWAYS call this FIRST to load AE preferences and account context from prior sessions
 - Live CRM data via get_account_signals (UC Function on serverless SQL)
 - Deal health scoring via calculate_deal_health (UC Function — scores 0-100 with risk flags)
 - Gong call transcripts via Vector Search (semantic retrieval over recent calls)
 - Competitive battlecards via Vector Search (ServiceNow, BMC, Splunk/Palo Alto, Zendesk/Freshworks)
 - Won/lost deal stories via Vector Search (historical deals for proof points)
+- **Lakebase Memory** via store_lakebase_memory — store new facts learned during the conversation
 
-When asked about a deal or account:
-1. ALWAYS call get_account_signals first to get the full account picture
-2. Call calculate_deal_health to get the quantitative score and risk flags
-3. Search call transcripts for recent conversation context
-4. For outreach drafts, search battlecards and deal stories for competitive intel and proof points
+CRITICAL WORKFLOW — follow this order for EVERY query:
+1. ALWAYS call recall_lakebase_memory FIRST with the AE ID to load their preferences and context
+2. Call get_account_signals to get the full account picture
+3. Call calculate_deal_health to get the quantitative score and risk flags
+4. Search call transcripts for recent conversation context
+5. For outreach drafts, search battlecards and deal stories for competitive intel and proof points
+
+Apply all preferences from Lakebase memory silently (email length, tone, competitors to avoid, etc.).
 
 When drafting outreach:
 - Reference specific insights from recent calls (use names and dates)
 - Connect product usage or engagement patterns to business outcomes
 - Include one relevant proof point from a similar customer
 - Single clear CTA relevant to the deal stage
-- Keep emails under 150 words unless told otherwise
+- Keep emails under 150 words unless memory says otherwise
 
 Be specific. Cite names, dates, numbers, and scores. Never use generic filler.
 Format deal health as a clear scorecard with risk flags called out."""
@@ -104,7 +123,199 @@ Return a JSON object with exactly three keys:
 
 Return ONLY valid JSON. No preamble, no explanation, no markdown fencing."""
 
-# ── Tools ────────────────────────────────────────────────────────────────
+
+# ── SQL helper ────────────────────────────────────────────────────────────
+def _run_sql(statement: str) -> list[dict]:
+    """Execute SQL via Databricks SQL Statement Execution API (Lakebase backend)."""
+    if not _SQL_AVAILABLE:
+        return []
+    try:
+        w = WorkspaceClient()
+        resp = w.statement_execution.execute_statement(
+            statement=statement,
+            warehouse_id=SQL_WAREHOUSE_ID,
+            wait_timeout="30s",
+        )
+        if resp.status and resp.status.state and resp.status.state.value == "SUCCEEDED":
+            if not resp.result or not resp.result.data_array:
+                return []
+            columns = [c.name for c in resp.manifest.schema.columns]
+            return [dict(zip(columns, row)) for row in resp.result.data_array]
+        else:
+            logger.warning("SQL execution failed: %s", resp.status)
+            return []
+    except Exception:
+        logger.warning("SQL execution error", exc_info=True)
+        return []
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  LAKEBASE MEMORY TOOLS — visible as tool calls in the agent output
+# ═══════════════════════════════════════════════════════════════════════════
+
+@tool
+def recall_lakebase_memory(ae_id: str, account_id: str = "") -> str:
+    """Load AE preferences, account context, and deal decisions from Lakebase memory tables.
+
+    ALWAYS call this tool FIRST before answering any question. It retrieves:
+    - AE email preferences (tone, length, CTA, competitors to avoid)
+    - Account-specific context (champion changes, budget, competitor intel)
+    - Recent deal decision history (what recommendations were accepted/rejected)
+
+    Args:
+        ae_id: The AE identifier (e.g., 'ae-jamie')
+        account_id: Optional account ID to load account-specific context
+    """
+    if not _SQL_AVAILABLE or not ae_id:
+        return json.dumps({
+            "status": "no_memory",
+            "message": "No AE ID provided or Lakebase not available. Proceeding without memory.",
+        })
+
+    result = {"ae_id": ae_id, "preferences": {}, "account_context": [], "deal_decisions": []}
+    safe_ae = ae_id.replace("'", "''")
+
+    # --- AE Preferences ---
+    rows = _run_sql(
+        f"SELECT email_style, outreach_prefs, avoid_competitors, raw_preferences "
+        f"FROM {CATALOG}.{SCHEMA}.memory_ae_profiles "
+        f"WHERE ae_id = '{safe_ae}'"
+    )
+    if rows:
+        prefs = rows[0]
+        email_style = prefs.get("email_style") or "{}"
+        if isinstance(email_style, str):
+            try:
+                email_style = json.loads(email_style)
+            except json.JSONDecodeError:
+                email_style = {}
+
+        outreach = prefs.get("outreach_prefs") or "{}"
+        if isinstance(outreach, str):
+            try:
+                outreach = json.loads(outreach)
+            except json.JSONDecodeError:
+                outreach = {}
+
+        avoid = prefs.get("avoid_competitors")
+        if avoid and isinstance(avoid, str):
+            try:
+                avoid = json.loads(avoid)
+            except json.JSONDecodeError:
+                avoid = [avoid]
+
+        raw = prefs.get("raw_preferences")
+        if raw and isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except json.JSONDecodeError:
+                raw = []
+
+        result["preferences"] = {
+            "email_style": email_style,
+            "outreach_prefs": outreach,
+            "avoid_competitors": [a for a in (avoid or []) if a],
+            "raw_preferences": (raw or [])[-5:],
+        }
+
+    # --- Account Context (last 90 days, high confidence) ---
+    if account_id:
+        safe_acct = account_id.replace("'", "''")
+        ctx_rows = _run_sql(
+            f"SELECT context_type, content, confidence, extracted_at "
+            f"FROM {CATALOG}.{SCHEMA}.memory_account_context "
+            f"WHERE account_id = '{safe_acct}' "
+            f"AND extracted_at > date_sub(current_timestamp(), 90) "
+            f"AND confidence > 0.80 "
+            f"ORDER BY extracted_at DESC LIMIT 10"
+        )
+        result["account_context"] = [
+            {
+                "type": r["context_type"],
+                "content": r["content"],
+                "confidence": r.get("confidence", ""),
+                "date": str(r.get("extracted_at", ""))[:10],
+            }
+            for r in ctx_rows
+        ]
+
+        # --- Recent Deal Decisions (last 30 days) ---
+        dec_rows = _run_sql(
+            f"SELECT d.opp_id, d.recommendation, d.ae_action, d.ae_feedback "
+            f"FROM {CATALOG}.{SCHEMA}.memory_deal_decisions d "
+            f"JOIN {CATALOG}.{SCHEMA}.gtm_opportunities o ON d.opp_id = o.opp_id "
+            f"WHERE o.account_id = '{safe_acct}' "
+            f"AND d.decided_at > date_sub(current_timestamp(), 30) "
+            f"ORDER BY d.decided_at DESC LIMIT 5"
+        )
+        result["deal_decisions"] = [
+            {
+                "opp_id": r["opp_id"],
+                "recommendation": r.get("recommendation", "")[:80],
+                "ae_action": r["ae_action"],
+                "ae_feedback": r.get("ae_feedback", ""),
+            }
+            for r in dec_rows
+        ]
+
+    return json.dumps(result, indent=2)
+
+
+@tool
+def store_lakebase_memory(ae_id: str, fact_type: str, content: str, account_id: str = "", confidence: float = 0.9) -> str:
+    """Store a new fact or preference in Lakebase memory tables for future sessions.
+
+    Call this when the AE shares a new preference, corrects the agent, or provides
+    account context that should be remembered across sessions.
+
+    Args:
+        ae_id: The AE identifier (e.g., 'ae-jamie')
+        fact_type: Type of fact — one of: 'ae_preference', 'account_context', 'deal_decision'
+        content: The fact or preference to store (e.g., 'email_tone:casual and friendly')
+        account_id: Account ID (required for account_context type)
+        confidence: Confidence score 0-1 (default 0.9)
+    """
+    if not _SQL_AVAILABLE or not ae_id:
+        return json.dumps({"status": "error", "message": "Lakebase not available"})
+
+    safe_ae = ae_id.replace("'", "''")
+    safe_content = content[:500].replace("'", "''")
+
+    if fact_type == "ae_preference":
+        _run_sql(
+            f"MERGE INTO {CATALOG}.{SCHEMA}.memory_ae_profiles t "
+            f"USING (SELECT '{safe_ae}' AS ae_id) s ON t.ae_id = s.ae_id "
+            f"WHEN MATCHED THEN UPDATE SET "
+            f"  raw_preferences = array_append(t.raw_preferences, '{safe_content}'), "
+            f"  updated_at = current_timestamp() "
+            f"WHEN NOT MATCHED THEN INSERT (ae_id, raw_preferences, updated_at) "
+            f"VALUES ('{safe_ae}', array('{safe_content}'), current_timestamp())"
+        )
+        return json.dumps({"status": "stored", "type": "ae_preference", "content": content})
+
+    elif fact_type == "account_context" and account_id:
+        safe_acct = account_id.replace("'", "''")
+        _run_sql(
+            f"INSERT INTO {CATALOG}.{SCHEMA}.memory_account_context "
+            f"(account_id, context_type, content, source_thread_id, ae_id, confidence, extracted_at) "
+            f"VALUES ('{safe_acct}', 'agent_noted', '{safe_content}', 'live', '{safe_ae}', "
+            f"{confidence}, current_timestamp())"
+        )
+        return json.dumps({"status": "stored", "type": "account_context", "account_id": account_id})
+
+    elif fact_type == "deal_decision":
+        dec_id = str(uuid.uuid4())
+        _run_sql(
+            f"INSERT INTO {CATALOG}.{SCHEMA}.memory_deal_decisions "
+            f"(decision_id, opp_id, ae_id, session_thread_id, recommendation, ae_action, ae_feedback, decided_at) "
+            f"VALUES ('{dec_id}', 'live', '{safe_ae}', 'live', '{safe_content}', 'noted', '', current_timestamp())"
+        )
+        return json.dumps({"status": "stored", "type": "deal_decision"})
+
+    return json.dumps({"status": "error", "message": f"Unknown fact_type: {fact_type}"})
+
+
+# ── UC Function + Vector Search Tools ────────────────────────────────────
 uc_toolkit = UCFunctionToolkit(
     function_names=[
         f"{CATALOG}.{SCHEMA}.calculate_deal_health",
@@ -130,16 +341,14 @@ deal_stories_retriever = VectorSearchRetrieverTool(
     columns=["story_id", "narrative", "industry", "outcome", "key_moments", "competitor"],
 )
 
-tools = []
+# Assemble all tools — Lakebase memory + UC Functions + Vector Search
+tools = [recall_lakebase_memory, store_lakebase_memory]
 tools.extend(uc_toolkit.tools)
 tools.extend([transcript_retriever, battlecard_retriever, deal_stories_retriever])
 
 # ── LLM ──────────────────────────────────────────────────────────────────
 llm = ChatDatabricks(endpoint=LLM_ENDPOINT)
 llm_with_tools = llm.bind_tools(tools)
-
-# ── Short-term memory: MemorySaver (in-process, persists across turns) ──
-_checkpointer = MemorySaver()
 
 
 # ── LangGraph ────────────────────────────────────────────────────────────
@@ -154,12 +363,11 @@ def should_continue(state):
     return "end"
 
 
-def _build_graph(checkpointer=None, memory_prefix=""):
-    """Build the LangGraph agent, optionally with checkpointer and memory prefix."""
-    system_prompt = memory_prefix + SYSTEM_PROMPT if memory_prefix else SYSTEM_PROMPT
+def _build_graph(checkpointer=None):
+    """Build the LangGraph agent with Lakebase checkpointer."""
 
     def call_model(state):
-        messages = [{"role": "system", "content": system_prompt}] + list(state["messages"])
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(state["messages"])
         return {"messages": [llm_with_tools.invoke(messages)]}
 
     graph_builder = StateGraph(AgentState)
@@ -175,156 +383,11 @@ def _build_graph(checkpointer=None, memory_prefix=""):
 _fallback_graph = _build_graph()
 
 
-# ── SQL helper for long-term memory ─────────────────────────────────────
-def _run_sql(statement: str) -> list[dict]:
-    """Execute a SQL statement via the Databricks SQL Statement Execution API.
-
-    Returns a list of dicts (one per row). Returns [] on failure.
-    """
-    if not _SQL_AVAILABLE:
-        return []
-    try:
-        w = WorkspaceClient()
-        resp = w.statement_execution.execute_statement(
-            statement=statement,
-            warehouse_id=SQL_WAREHOUSE_ID,
-            wait_timeout="30s",
-        )
-        if resp.status and resp.status.state and resp.status.state.value == "SUCCEEDED":
-            if not resp.result or not resp.result.data_array:
-                return []
-            columns = [c.name for c in resp.manifest.schema.columns]
-            return [dict(zip(columns, row)) for row in resp.result.data_array]
-        else:
-            logger.warning("SQL execution failed: %s", resp.status)
-            return []
-    except Exception:
-        logger.warning("SQL execution error", exc_info=True)
-        return []
-
-
-# ── Long-term memory: load ──────────────────────────────────────────────
-def _load_memory_prefix(ae_id: str, account_id: str | None = None) -> str:
-    """Load long-term memory from Delta tables and format as system prompt prefix."""
-    if not _SQL_AVAILABLE or not ae_id:
-        return ""
-    try:
-        sections: list[str] = []
-        safe_ae = ae_id.replace("'", "''")
-
-        # --- AE Preferences ---
-        rows = _run_sql(
-            f"SELECT email_style, outreach_prefs, avoid_competitors, raw_preferences "
-            f"FROM {CATALOG}.{SCHEMA}.memory_ae_profiles "
-            f"WHERE ae_id = '{safe_ae}'"
-        )
-        if rows:
-            prefs = rows[0]
-            pref_lines: list[str] = []
-
-            email_style = prefs.get("email_style") or "{}"
-            if isinstance(email_style, str):
-                try:
-                    email_style = json.loads(email_style)
-                except json.JSONDecodeError:
-                    email_style = {}
-            if email_style.get("max_words"):
-                pref_lines.append(f"- Keep emails under {email_style['max_words']} words")
-            if email_style.get("tone"):
-                pref_lines.append(f"- Tone: {email_style['tone']}")
-
-            avoid = prefs.get("avoid_competitors")
-            if avoid:
-                if isinstance(avoid, str):
-                    # Delta ARRAY<STRING> returned as JSON string like '["ServiceNow"]'
-                    try:
-                        avoid = json.loads(avoid)
-                    except json.JSONDecodeError:
-                        avoid = [avoid]
-                if avoid and avoid != [""] and avoid != []:
-                    pref_lines.append(f"- Do not mention: {', '.join(str(a) for a in avoid if a)}")
-
-            outreach = prefs.get("outreach_prefs") or "{}"
-            if isinstance(outreach, str):
-                try:
-                    outreach = json.loads(outreach)
-                except json.JSONDecodeError:
-                    outreach = {}
-            if outreach.get("preferred_cta"):
-                pref_lines.append(f"- Preferred CTA: {outreach['preferred_cta']}")
-
-            raw = prefs.get("raw_preferences")
-            if raw:
-                if isinstance(raw, str):
-                    try:
-                        raw = json.loads(raw)
-                    except json.JSONDecodeError:
-                        raw = []
-                for p in (raw or [])[-5:]:
-                    if ":" in str(p):
-                        pref_lines.append(f"- {str(p).split(':', 1)[-1].strip()}")
-
-            if pref_lines:
-                sections.append("## AE PREFERENCES (from prior sessions)\n" + "\n".join(pref_lines))
-
-        # --- Account Context (last 90 days, high confidence) ---
-        if account_id:
-            safe_acct = account_id.replace("'", "''")
-            ctx_rows = _run_sql(
-                f"SELECT context_type, content, extracted_at "
-                f"FROM {CATALOG}.{SCHEMA}.memory_account_context "
-                f"WHERE account_id = '{safe_acct}' "
-                f"AND extracted_at > date_sub(current_timestamp(), 90) "
-                f"AND confidence > 0.80 "
-                f"ORDER BY extracted_at DESC LIMIT 10"
-            )
-            if ctx_rows:
-                ctx_lines = []
-                for r in ctx_rows:
-                    date_str = str(r.get("extracted_at", ""))[:7]  # YYYY-MM
-                    ctx_lines.append(f"- [{r['context_type']}] {r['content']} (surfaced {date_str})")
-                sections.append("## ACCOUNT CONTEXT (from prior sessions)\n" + "\n".join(ctx_lines))
-
-            # --- Recent Deal Decisions (last 30 days) ---
-            dec_rows = _run_sql(
-                f"SELECT d.recommendation, d.ae_action, d.ae_feedback "
-                f"FROM {CATALOG}.{SCHEMA}.memory_deal_decisions d "
-                f"JOIN {CATALOG}.{SCHEMA}.gtm_opportunities o ON d.opp_id = o.opp_id "
-                f"WHERE o.account_id = '{safe_acct}' "
-                f"AND d.decided_at > date_sub(current_timestamp(), 30) "
-                f"ORDER BY d.decided_at DESC LIMIT 5"
-            )
-            if dec_rows:
-                dec_lines = []
-                for r in dec_rows:
-                    rec = str(r.get("recommendation", ""))[:80]
-                    line = f'- Recommended: "{rec}" -> AE {r["ae_action"]}'
-                    if r.get("ae_feedback"):
-                        line += f': "{r["ae_feedback"]}"'
-                    dec_lines.append(line)
-                sections.append("## RECENT DECISION HISTORY\n" + "\n".join(dec_lines))
-
-        if not sections:
-            return ""
-        return (
-            "# MEMORY FROM PRIOR SESSIONS\n"
-            "The following was learned from previous conversations. Apply it silently.\n\n"
-            + "\n\n".join(sections)
-            + "\n\n---\n\n"
-        )
-    except Exception:
-        logger.warning("Failed to load long-term memory — continuing without", exc_info=True)
-        return ""
-
-
-# ── Long-term memory: extract + store ───────────────────────────────────
+# ── Long-term memory: extract + store (end-of-session batch) ─────────────
 def _extract_and_store_memories(
     thread_id: str, ae_id: str, conversation: list[dict]
 ) -> None:
-    """Run haiku extraction agent on the conversation and write to Delta tables.
-
-    Failures are logged but never propagated — memory extraction is best-effort.
-    """
+    """Run haiku extraction agent on the conversation and write to Lakebase memory tables."""
     if not _SQL_AVAILABLE or not ae_id:
         return
     try:
@@ -345,7 +408,6 @@ def _extract_and_store_memories(
         extracted = json.loads(result.content)
         safe_ae = ae_id.replace("'", "''")
 
-        # Append raw preferences
         for pref in extracted.get("ae_preferences", []):
             if pref.get("confidence", 0) < 0.75:
                 continue
@@ -360,7 +422,6 @@ def _extract_and_store_memories(
                 f"VALUES ('{safe_ae}', array('{val}'), current_timestamp())"
             )
 
-        # Insert account context
         for ctx in extracted.get("account_context", []):
             if ctx.get("confidence", 0) < 0.80:
                 continue
@@ -374,7 +435,6 @@ def _extract_and_store_memories(
                 f"{ctx['confidence']}, current_timestamp())"
             )
 
-        # Log deal decisions
         for dec in extracted.get("deal_decisions", []):
             safe_rec = dec["recommendation"].replace("'", "''")
             safe_fb = dec.get("ae_feedback", "").replace("'", "''")
@@ -386,14 +446,72 @@ def _extract_and_store_memories(
                 f"'{safe_rec}', '{dec['ae_action']}', '{safe_fb}', current_timestamp())"
             )
 
-        logger.info("Memories extracted and stored for thread %s", thread_id)
+        logger.info("Memories extracted and stored in Lakebase for thread %s", thread_id)
     except Exception:
         logger.warning("Memory extraction failed — skipping", exc_info=True)
 
 
+# ── Inline Guardrails ──────────────────────────────────────────────────
+_INJECTION_PATTERNS = [
+    r"ignore previous instructions",
+    r"ignore all prior",
+    r"system prompt",
+    r"reveal your instructions",
+    r"act as\s+(root|admin|developer|system)",
+    r"pretend you are",
+    r"disregard.*instructions",
+    r"what are your (instructions|rules|guidelines)",
+    r"output your (system|initial) (prompt|message)",
+    r"repeat (everything|all) above",
+    r"jailbreak",
+    r"DAN mode",
+]
+_INJECTION_RE = re.compile("|".join(_INJECTION_PATTERNS), re.IGNORECASE)
+
+_PII_PATTERNS = {
+    "email": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
+    "phone": re.compile(r"\b(?:\+1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"),
+    "ssn": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+}
+
+BLOCKED_RESPONSE_TEXT = (
+    "I can't process that request. It appears to contain instructions that "
+    "conflict with my guidelines. I'm here to help with deal intelligence, "
+    "account research, and outreach drafting."
+)
+
+
+def _check_prompt_injection(text: str) -> bool:
+    return bool(_INJECTION_RE.search(text))
+
+
+def _check_pii_leakage(text: str) -> list[str]:
+    found = []
+    for pii_type, pattern in _PII_PATTERNS.items():
+        if pattern.search(text):
+            found.append(pii_type)
+    return found
+
+
+def _log_security_event(event_type: str, ae_id: str, thread_id: str, detail: str) -> None:
+    if not _SQL_AVAILABLE:
+        return
+    try:
+        safe_ae = ae_id.replace("'", "''")
+        safe_detail = detail[:500].replace("'", "''")
+        event_id = str(uuid.uuid4())
+        _run_sql(
+            f"INSERT INTO {CATALOG}.{SCHEMA}.audit_agent_access "
+            f"(event_id, event_type, ae_id, thread_id, detail, created_at) "
+            f"VALUES ('{event_id}', '{event_type}', '{safe_ae}', '{thread_id}', "
+            f"'{safe_detail}', current_timestamp())"
+        )
+    except Exception:
+        logger.warning("Failed to log security event", exc_info=True)
+
+
 # ── Streaming helper ────────────────────────────────────────────────────
 def _stream_graph(graph, messages, config=None):
-    """Yield ResponsesAgent stream events from a LangGraph execution."""
     kwargs = {"stream_mode": ["updates"]}
     if config:
         kwargs["config"] = config
@@ -418,22 +536,55 @@ class GTMDealAgent(ResponsesAgent):
     def predict_stream(
         self, request: ResponsesAgentRequest
     ) -> Generator[ResponsesAgentStreamEvent, None, None]:
-        # ── Extract custom inputs ────────────────────────────────────
         custom_inputs = getattr(request, "custom_inputs", None) or {}
         thread_id = custom_inputs.get("thread_id") or str(uuid.uuid4())
         ae_id = custom_inputs.get("ae_id", "")
-        account_id = custom_inputs.get("account_id")
         save_memories = custom_inputs.get("save_memories", False)
 
         messages = to_chat_completions_input([m.model_dump() for m in request.input])
 
-        # ── Long-term memory (cross-session, from Delta tables) ──────
-        memory_prefix = _load_memory_prefix(ae_id, account_id)
+        # ── Pre-request guardrail: prompt injection detection ────────
+        last_user_msg = ""
+        for m in reversed(messages):
+            if m.get("role") == "user" and m.get("content"):
+                last_user_msg = m["content"]
+                break
 
-        # ── Short-term memory (multi-turn via MemorySaver) ───────────
-        graph = _build_graph(checkpointer=_checkpointer, memory_prefix=memory_prefix)
+        if _check_prompt_injection(last_user_msg):
+            _log_security_event("prompt_injection_blocked", ae_id, thread_id, last_user_msg)
+            logger.warning("Prompt injection detected from ae=%s thread=%s", ae_id, thread_id)
+            blocked_item = {
+                "type": "message",
+                "id": f"msg_{uuid.uuid4().hex[:12]}",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": BLOCKED_RESPONSE_TEXT}],
+            }
+            yield ResponsesAgentStreamEvent(type="response.output_item.done", item=blocked_item)
+            return
+
+        # ── Run LangGraph agent (memory loaded via recall_lakebase_memory tool) ──
+        graph = _build_graph(checkpointer=_checkpointer)
         config = {"configurable": {"thread_id": thread_id}}
-        yield from _stream_graph(graph, messages, config)
+
+        # Collect output for post-response PII check
+        all_events = []
+        for event in _stream_graph(graph, messages, config):
+            all_events.append(event)
+            yield event
+
+        # ── Post-response guardrail: PII leakage detection ───────────
+        for event in all_events:
+            if hasattr(event, "item") and isinstance(event.item, dict):
+                item = event.item
+                if item.get("type") == "message":
+                    for content in item.get("content", []):
+                        if content.get("type") == "output_text":
+                            pii_found = _check_pii_leakage(content.get("text", ""))
+                            if pii_found:
+                                _log_security_event(
+                                    "pii_in_output", ae_id, thread_id,
+                                    f"PII types: {', '.join(pii_found)}"
+                                )
 
         # ── Extract memories if requested (e.g., on session end) ─────
         if save_memories and ae_id:
@@ -441,7 +592,7 @@ class GTMDealAgent(ResponsesAgent):
             _extract_and_store_memories(thread_id, ae_id, conv)
 
 
-# ── Register with MLflow (this is what Model Serving loads) ──────────────
+# ── Register with MLflow ──────────────────────────────────────────────────
 mlflow.langchain.autolog()
 agent = GTMDealAgent()
 mlflow.models.set_model(agent)
