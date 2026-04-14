@@ -22,6 +22,11 @@ _sql_cache: dict[str, tuple[float, list[dict]]] = {}
 _SQL_CACHE_TTL = 60
 
 
+def invalidate_sql_cache():
+    """Clear the SQL cache so Observatory shows fresh data after agent interactions."""
+    _sql_cache.clear()
+
+
 def _get_workspace_client():
     from databricks.sdk import WorkspaceClient
     from databricks.sdk.config import Config
@@ -56,7 +61,8 @@ def run_app_sql(statement: str) -> list[dict]:
 def query_agent(conversation: list[dict], thread_id: str, ae_id: str = "", account_id: str = "") -> dict:
     w = _get_workspace_client()
     input_messages = [{"role": m["role"], "content": m["content"]} for m in conversation if m["role"] in ("user", "assistant") and m.get("content")]
-    body = {"input": input_messages, "custom_inputs": {"thread_id": thread_id, "ae_id": ae_id, "save_memories": False}}
+    save = bool(ae_id)
+    body = {"input": input_messages, "custom_inputs": {"thread_id": thread_id, "ae_id": ae_id, "save_memories": save}}
     if account_id:
         body["custom_inputs"]["account_id"] = account_id
     return w.api_client.do("POST", f"/serving-endpoints/{ENDPOINT_NAME}/invocations", body=body)
@@ -69,7 +75,8 @@ def query_agent_stream(conversation: list[dict], thread_id: str, ae_id: str = ""
 
     w = _get_workspace_client()
     input_messages = [{"role": m["role"], "content": m["content"]} for m in conversation if m["role"] in ("user", "assistant") and m.get("content")]
-    body = {"input": input_messages, "custom_inputs": {"thread_id": thread_id, "ae_id": ae_id, "save_memories": False}}
+    save = bool(ae_id)
+    body = {"input": input_messages, "custom_inputs": {"thread_id": thread_id, "ae_id": ae_id, "save_memories": save}}
     if account_id:
         body["custom_inputs"]["account_id"] = account_id
 

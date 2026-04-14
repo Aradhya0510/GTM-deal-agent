@@ -83,6 +83,11 @@ CRITICAL WORKFLOW — follow this order for EVERY query:
 3. Call calculate_deal_health to get the quantitative score and risk flags
 4. Search call transcripts for recent conversation context
 5. For outreach drafts, search battlecards and deal stories for competitive intel and proof points
+6. ALWAYS call store_lakebase_memory when the AE shares ANY preference, correction, or feedback:
+   - New style preference → fact_type="ae_preference", content="preference_type:value" (e.g. "email_tone:casual")
+   - Account insight → fact_type="account_context", include account_id
+   - Deal decision (accept/reject/modify a recommendation) → fact_type="deal_decision"
+   Do NOT skip this step. Memory persistence is critical for cross-session continuity.
 
 Apply all preferences from Lakebase memory silently (email length, tone, competitors to avoid, etc.).
 
@@ -125,12 +130,53 @@ Return ONLY valid JSON. No preamble, no explanation, no markdown fencing."""
 
 
 # ── SQL helper ────────────────────────────────────────────────────────────
-def _run_sql(statement: str) -> list[dict]:
+class _SqlResult:
+    """Wraps SQL execution outcome so callers can distinguish success from failure.
+
+    Truthiness checks row count (backward compat with recall code that does `if rows:`).
+    Use `.ok` explicitly for DML success checks in store operations.
+    """
+    __slots__ = ("ok", "rows", "error")
+
+    def __init__(self, ok: bool, rows: list[dict] | None = None, error: str = ""):
+        self.ok = ok
+        self.rows = rows or []
+        self.error = error
+
+    def __iter__(self):
+        return iter(self.rows)
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, idx):
+        return self.rows[idx]
+
+    def __bool__(self):
+        return bool(self.rows)
+
+
+def _get_sql_client():
+    """Get a WorkspaceClient for SQL operations.
+
+    Uses explicit PAT credentials (via LAKEBASE_SQL_TOKEN env var) for write operations,
+    because the auto-auth passthrough SP only gets read access to DatabricksTable resources.
+    Falls back to default WorkspaceClient (auto-auth) if no explicit token is set.
+    """
+    import os
+    token = os.environ.get("LAKEBASE_SQL_TOKEN")
+    host = os.environ.get("DATABRICKS_HOST", "https://e2-demo-west.cloud.databricks.com")
+    if token:
+        return WorkspaceClient(host=host, token=token)
+    return WorkspaceClient()
+
+
+def _run_sql(statement: str) -> _SqlResult:
     """Execute SQL via Databricks SQL Statement Execution API (Lakebase backend)."""
     if not _SQL_AVAILABLE:
-        return []
+        return _SqlResult(False, error="SDK not available")
     try:
-        w = WorkspaceClient()
+        w = _get_sql_client()
         resp = w.statement_execution.execute_statement(
             statement=statement,
             warehouse_id=SQL_WAREHOUSE_ID,
@@ -138,15 +184,16 @@ def _run_sql(statement: str) -> list[dict]:
         )
         if resp.status and resp.status.state and resp.status.state.value == "SUCCEEDED":
             if not resp.result or not resp.result.data_array:
-                return []
+                return _SqlResult(True, [])
             columns = [c.name for c in resp.manifest.schema.columns]
-            return [dict(zip(columns, row)) for row in resp.result.data_array]
+            return _SqlResult(True, [dict(zip(columns, row)) for row in resp.result.data_array])
         else:
-            logger.warning("SQL execution failed: %s", resp.status)
-            return []
-    except Exception:
+            err = str(resp.status) if resp.status else "unknown"
+            logger.warning("SQL execution failed: %s", err)
+            return _SqlResult(False, error=err)
+    except Exception as e:
         logger.warning("SQL execution error", exc_info=True)
-        return []
+        return _SqlResult(False, error=str(e))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -181,6 +228,9 @@ def recall_lakebase_memory(ae_id: str, account_id: str = "") -> str:
         f"FROM {CATALOG}.{SCHEMA}.memory_ae_profiles "
         f"WHERE ae_id = '{safe_ae}'"
     )
+    if not rows.ok:
+        logger.error("recall_lakebase_memory SQL failed for ae_profiles: %s", rows.error)
+        result["sql_error"] = f"Could not read ae_profiles: {rows.error}"
     if rows:
         prefs = rows[0]
         email_style = prefs.get("email_style") or "{}"
@@ -282,7 +332,7 @@ def store_lakebase_memory(ae_id: str, fact_type: str, content: str, account_id: 
     safe_content = content[:500].replace("'", "''")
 
     if fact_type == "ae_preference":
-        _run_sql(
+        res = _run_sql(
             f"MERGE INTO {CATALOG}.{SCHEMA}.memory_ae_profiles t "
             f"USING (SELECT '{safe_ae}' AS ae_id) s ON t.ae_id = s.ae_id "
             f"WHEN MATCHED THEN UPDATE SET "
@@ -291,25 +341,34 @@ def store_lakebase_memory(ae_id: str, fact_type: str, content: str, account_id: 
             f"WHEN NOT MATCHED THEN INSERT (ae_id, raw_preferences, updated_at) "
             f"VALUES ('{safe_ae}', array('{safe_content}'), current_timestamp())"
         )
+        if not res.ok:
+            logger.error("store_lakebase_memory ae_preference FAILED: %s", res.error)
+            return json.dumps({"status": "error", "message": f"SQL write failed: {res.error}"})
         return json.dumps({"status": "stored", "type": "ae_preference", "content": content})
 
     elif fact_type == "account_context" and account_id:
         safe_acct = account_id.replace("'", "''")
-        _run_sql(
+        res = _run_sql(
             f"INSERT INTO {CATALOG}.{SCHEMA}.memory_account_context "
             f"(account_id, context_type, content, source_thread_id, ae_id, confidence, extracted_at) "
             f"VALUES ('{safe_acct}', 'agent_noted', '{safe_content}', 'live', '{safe_ae}', "
             f"{confidence}, current_timestamp())"
         )
+        if not res.ok:
+            logger.error("store_lakebase_memory account_context FAILED: %s", res.error)
+            return json.dumps({"status": "error", "message": f"SQL write failed: {res.error}"})
         return json.dumps({"status": "stored", "type": "account_context", "account_id": account_id})
 
     elif fact_type == "deal_decision":
         dec_id = str(uuid.uuid4())
-        _run_sql(
+        res = _run_sql(
             f"INSERT INTO {CATALOG}.{SCHEMA}.memory_deal_decisions "
             f"(decision_id, opp_id, ae_id, session_thread_id, recommendation, ae_action, ae_feedback, decided_at) "
             f"VALUES ('{dec_id}', 'live', '{safe_ae}', 'live', '{safe_content}', 'noted', '', current_timestamp())"
         )
+        if not res.ok:
+            logger.error("store_lakebase_memory deal_decision FAILED: %s", res.error)
+            return json.dumps({"status": "error", "message": f"SQL write failed: {res.error}"})
         return json.dumps({"status": "stored", "type": "deal_decision"})
 
     return json.dumps({"status": "error", "message": f"Unknown fact_type: {fact_type}"})
@@ -500,12 +559,14 @@ def _log_security_event(event_type: str, ae_id: str, thread_id: str, detail: str
         safe_ae = ae_id.replace("'", "''")
         safe_detail = detail[:500].replace("'", "''")
         event_id = str(uuid.uuid4())
-        _run_sql(
+        res = _run_sql(
             f"INSERT INTO {CATALOG}.{SCHEMA}.audit_agent_access "
             f"(event_id, event_type, ae_id, thread_id, detail, created_at) "
             f"VALUES ('{event_id}', '{event_type}', '{safe_ae}', '{thread_id}', "
             f"'{safe_detail}', current_timestamp())"
         )
+        if not res.ok:
+            logger.error("Failed to write audit event '%s': %s", event_type, res.error)
     except Exception:
         logger.warning("Failed to log security event", exc_info=True)
 

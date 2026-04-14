@@ -41,9 +41,11 @@ Security:   Pre-request injection detection + post-response PII scan → audit_a
 - Agent calls `recall_lakebase_memory(ae_id, account_id)` as its **first tool call** on every query — this is a visible LangGraph tool that shows up in tool call cards
 - Queries 3 Delta tables via SQL Statement Execution API (`warehouse_id: 75fd8278393d07eb`)
 - Returns structured JSON with preferences, account context, and deal decisions
-- Agent can also call `store_lakebase_memory()` to write new facts during conversation
+- Agent calls `store_lakebase_memory()` to write new facts during conversation (step 6 in critical workflow)
 - At session end: `_extract_and_store_memories()` runs haiku extraction agent for batch writes
 - Tables: `users.aradhya_chouhan.memory_ae_profiles`, `memory_account_context`, `memory_deal_decisions`
+- **Auth**: Reads use auto-auth passthrough (`DatabricksTable` resource); writes use a dedicated PAT via `LAKEBASE_SQL_TOKEN` env var (secret: `gtm-agent/sql-write-token`)
+- **AE IDs**: Short format (`ae-jamie`, `ae-sarah`) — must match between seed data and app `AE_PROFILES`
 
 **Key design decision**: Memory is a visible tool call (not a hidden pre-processing step) so it appears in the demo UI alongside UC Functions and Vector Search. The system prompt instructs "ALWAYS call recall_lakebase_memory FIRST".
 
@@ -90,7 +92,10 @@ except ImportError:
     from langgraph.checkpoint.memory import MemorySaver
 
 # CORRECT — resources for auth passthrough in log_model()
-from mlflow.models.resources import DatabricksServingEndpoint, DatabricksFunction, DatabricksVectorSearchIndex
+from mlflow.models.resources import (
+    DatabricksServingEndpoint, DatabricksFunction, DatabricksVectorSearchIndex,
+    DatabricksSQLWarehouse, DatabricksTable,
+)
 
 # WRONG — these do NOT exist:
 # from databricks.agents.tools import VectorSearchRetriever, UCFunctionTool  # NO!
@@ -130,8 +135,13 @@ Delta-sync indexes on NEWLY CREATED endpoints can take 20-30+ minutes ("pending 
 ### 6. MLflow autolog conflicts with explicit start_run()
 `mlflow.langchain.autolog()` creates an active run. A subsequent `mlflow.start_run()` raises "Run with UUID ... is already active". Fix: call `mlflow.end_run()` before `start_run()`, or don't use autolog in the logging notebook.
 
-### 7. Resources for auth passthrough
-When logging with `mlflow.pyfunc.log_model()`, declare all Databricks resources so Model Serving can authenticate. Include both LLM endpoints (primary + haiku for memory extraction). Custom Python tools (recall/store_lakebase_memory) use SQL Statement Execution API which authenticates via the serving endpoint's service principal — no extra resource declarations needed.
+### 7. Resources for auth passthrough — including SQL warehouse and tables
+When logging with `mlflow.pyfunc.log_model()`, declare ALL Databricks resources so Model Serving can authenticate. This includes:
+- LLM endpoints (primary + haiku for memory extraction)
+- `DatabricksSQLWarehouse(warehouse_id=...)` for SQL Statement Execution API access
+- `DatabricksTable(table_name=...)` for each Delta table the agent reads
+
+**Critical:** `DatabricksTable` only grants **SELECT** (read) access via auto-auth passthrough. The system-generated SP is invisible (doesn't appear in API/UI) and only gets read access. For **MODIFY** (INSERT/MERGE), you must use manual authentication — see learning #18.
 
 ### 8. Source tables need CDF for delta-sync indexes
 `TBLPROPERTIES (delta.enableChangeDataFeed = true)` must be set on source tables BEFORE creating delta-sync Vector Search indexes.
@@ -177,6 +187,29 @@ blocked_item = {
 }
 yield ResponsesAgentStreamEvent(type="response.output_item.done", item=blocked_item)
 ```
+
+### 18. Auto-auth passthrough SP only gets read access — use PAT for writes
+The `agents.deploy()` framework creates a hidden system SP per model version that gets **SELECT only** on `DatabricksTable` resources. It cannot INSERT/MERGE/UPDATE. The SP doesn't appear in SCIM, endpoint permissions, or query history for failed DML. To enable writes from custom tools (like `store_lakebase_memory`), use a dedicated PAT stored in Databricks secrets and injected via `environment_vars` in `agents.deploy()`:
+```python
+# In log_and_deploy_notebook.py
+deploy(model_name=..., model_version=..., environment_vars={
+    "LAKEBASE_SQL_TOKEN": "{{secrets/gtm-agent/sql-write-token}}",
+})
+
+# In agent.py — use a separate WorkspaceClient for SQL, not the default auto-auth one
+token = os.environ.get("LAKEBASE_SQL_TOKEN")
+if token:
+    w = WorkspaceClient(host=host, token=token)  # Has MODIFY
+else:
+    w = WorkspaceClient()  # Auto-auth, SELECT only
+```
+**Do NOT** set `DATABRICKS_TOKEN` globally — that overrides auto-auth for ALL resources. Use a custom env var name.
+
+### 19. AE IDs must match between seed data and app code
+The memory seed data (`lakebase_memory_setup.py`) and the app's `AE_PROFILES` dict (`backend.py`) must use the **same `ae_id` format**. Mismatches (e.g., `ae-jamie@company.com` vs `ae-jamie`) cause `recall_lakebase_memory` to return empty preferences silently, since the WHERE clause finds no rows. Current convention: short IDs like `ae-jamie`, `ae-sarah`.
+
+### 20. UC table grants to `account users` don't cover auto-auth SPs
+The system-generated SP from `agents.deploy()` is NOT in the `account users` group. Granting `MODIFY ON TABLE ... TO account users` has no effect on the serving endpoint's identity. The only reliable paths for write access are: manual PAT auth (learning #18) or on-behalf-of-user (OBO) auth with `ModelServingUserCredentials`.
 
 ## Commands
 
@@ -257,7 +290,8 @@ App URL: `https://gtm-deal-intelligence-2556758628403379.aws.databricksapps.com`
 | UC Functions | `users.aradhya_chouhan.calculate_deal_health`, `get_account_signals` |
 | MLflow Experiment | `/Users/aradhya.chouhan@databricks.com/gtm-deal-intelligence` |
 | Model | `users.aradhya_chouhan.gtm_deal_intelligence_agent` |
-| Serving Endpoint | `agents_users-aradhya_chouhan-gtm_deal_intelligence_agent` (v3 = Lakebase memory tools + guardrails) |
+| Serving Endpoint | `agents_users-aradhya_chouhan-gtm_deal_intelligence_agent` (v8 = SQL write PAT + resource declarations + store prompt fix) |
+| Secrets | Scope `gtm-agent`, key `sql-write-token` — PAT for agent SQL writes (90-day TTL) |
 | SQL Warehouse | `75fd8278393d07eb` ("Shared Endpoint") — used by agent for Lakebase memory queries |
 | Memory Tables (Delta/Lakebase) | `users.aradhya_chouhan.memory_ae_profiles`, `memory_account_context`, `memory_deal_decisions` |
 | Streamlit App | `gtm-deal-intelligence` — `https://gtm-deal-intelligence-2556758628403379.aws.databricksapps.com` |

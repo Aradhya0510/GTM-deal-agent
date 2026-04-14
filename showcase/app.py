@@ -7,7 +7,7 @@ st.set_page_config(page_title="ServiceNow · Mission Control", page_icon="🟢",
 
 from backend import (ENDPOINT_NAME, CATALOG, SCHEMA, SQL_WAREHOUSE_ID, WORKSPACE_URL, WORKSPACE_ID,
     AE_PROFILES, run_app_sql, query_agent, extract_text, extract_tool_calls,
-    classify_tool, tool_type_label, tool_color, fetch_mlflow_experiment_stats)
+    classify_tool, tool_type_label, tool_color, fetch_mlflow_experiment_stats, invalidate_sql_cache)
 from data import INDUSTRIES, risk_flag_class, gauge_color
 from styles import CSS
 from components import render_xray, render_dag
@@ -419,6 +419,7 @@ elif page == 4:
 # PAGE 5: OBSERVATORY (real data + deep links)
 # ══════════════════════════════════════════
 elif page == 5:
+    invalidate_sql_cache()
     o1, o2 = st.columns(2)
     with o1:
         mlflow_stats = fetch_mlflow_experiment_stats()
@@ -457,16 +458,28 @@ elif page == 5:
     with o3:
         eh2, ec = "", 0
         if ae_id:
-            prefs = run_app_sql(f"SELECT email_style FROM {CATALOG}.{SCHEMA}.memory_ae_profiles WHERE ae_id = '{ae_id}'")
+            prefs = run_app_sql(f"SELECT email_style, raw_preferences FROM {CATALOG}.{SCHEMA}.memory_ae_profiles WHERE ae_id = '{ae_id}'")
             if prefs:
                 es = prefs[0].get("email_style","{}")
                 try: es = json.loads(es) if isinstance(es,str) else es
                 except: es = {}
                 if es.get("max_words"):
                     eh2 += f'<div class="mb-entry"><div class="mb-type pref">PREF</div><div><div class="mb-content"><strong>max_words</strong> · {es["max_words"]}</div></div></div>'; ec+=1
-            ctx = run_app_sql(f"SELECT a.company_name, c.content FROM {CATALOG}.{SCHEMA}.memory_account_context c LEFT JOIN {CATALOG}.{SCHEMA}.gtm_accounts a ON c.account_id=a.account_id WHERE c.ae_id='{ae_id}' AND c.confidence>0.80 ORDER BY c.extracted_at DESC LIMIT 5")
+                raw = prefs[0].get("raw_preferences")
+                if raw:
+                    try: raw = json.loads(raw) if isinstance(raw, str) else raw
+                    except: raw = []
+                    if isinstance(raw, list):
+                        for rp in raw[-5:]:
+                            eh2 += f'<div class="mb-entry"><div class="mb-type pref">PREF</div><div><div class="mb-content">{rp}</div></div></div>'; ec+=1
+            ctx = run_app_sql(f"SELECT a.company_name, c.content, c.extracted_at FROM {CATALOG}.{SCHEMA}.memory_account_context c LEFT JOIN {CATALOG}.{SCHEMA}.gtm_accounts a ON c.account_id=a.account_id WHERE c.ae_id='{ae_id}' AND c.confidence>0.80 ORDER BY c.extracted_at DESC LIMIT 5")
             for r in (ctx or []):
-                eh2 += f'<div class="mb-entry"><div class="mb-type account">ACCT</div><div><div class="mb-content"><strong>{r.get("company_name","")}</strong> · {r.get("content","")}</div></div></div>'; ec+=1
+                ts = str(r.get("extracted_at",""))[:16]
+                eh2 += f'<div class="mb-entry"><div class="mb-type account">ACCT</div><div><div class="mb-content"><strong>{r.get("company_name","")}</strong> · {r.get("content","")}</div><div style="font-size:9px;color:var(--txt3);font-family:var(--mono)">{ts}</div></div></div>'; ec+=1
+            decisions = run_app_sql(f"SELECT d.recommendation, d.ae_action, d.decided_at FROM {CATALOG}.{SCHEMA}.memory_deal_decisions d WHERE d.ae_id='{ae_id}' ORDER BY d.decided_at DESC LIMIT 5")
+            for r in (decisions or []):
+                ts = str(r.get("decided_at",""))[:16]
+                eh2 += f'<div class="mb-entry"><div class="mb-type decision">DEAL</div><div><div class="mb-content">{r.get("recommendation","")}</div><div style="font-size:9px;color:var(--txt3);font-family:var(--mono)">{r.get("ae_action","")} · {ts}</div></div></div>'; ec+=1
         if ec==0:
             eh2 = '<div style="font-size:11px;color:var(--txt3)">Select an AE to load memory.</div>'
         mem_link = AL.get("memory_ae_profiles","#")
@@ -475,11 +488,21 @@ elif page == 5:
     with o4:
         ad = run_app_sql(f"SELECT event_type, detail, created_at FROM {CATALOG}.{SCHEMA}.audit_agent_access ORDER BY created_at DESC LIMIT 8")
         audit_link = AL.get("audit_agent_access","#")
-        if ad:
-            lh = ''.join(f'<div class="lw-entry"><div class="lw-sev {"crit" if "injection" in r.get("event_type","") else "ok"}">{("ALERT" if "injection" in r.get("event_type","") else "CLEAR")}</div><div class="lw-msg"><strong>{r.get("event_type","")}</strong> · {str(r.get("detail",""))[:60]}</div><div class="lw-time">{str(r.get("created_at",""))[:16]}</div></div>' for r in ad)
+        alert_count = sum(1 for r in (ad or []) if "injection" in r.get("event_type", ""))
+        all_events = []
+        for r in (ad or []):
+            is_alert = "injection" in r.get("event_type", "")
+            all_events.append({"sev": "crit" if is_alert else "ok", "label": "ALERT" if is_alert else "CLEAR", "msg": f'<strong>{r.get("event_type","")}</strong> · {str(r.get("detail",""))[:60]}', "time": str(r.get("created_at",""))[:16]})
+        if ae_id:
+            mem_writes = run_app_sql(f"SELECT 'memory_write' as event_type, content as detail, extracted_at as created_at FROM {CATALOG}.{SCHEMA}.memory_account_context WHERE ae_id='{ae_id}' UNION ALL SELECT 'memory_write', recommendation, decided_at FROM {CATALOG}.{SCHEMA}.memory_deal_decisions WHERE ae_id='{ae_id}' ORDER BY created_at DESC LIMIT 5")
+            for r in (mem_writes or []):
+                all_events.append({"sev": "ok", "label": "WRITE", "msg": f'<strong>memory_write</strong> · {str(r.get("detail",""))[:60]}', "time": str(r.get("created_at",""))[:16]})
+        if all_events:
+            all_events.sort(key=lambda x: x["time"], reverse=True)
+            lh = ''.join(f'<div class="lw-entry"><div class="lw-sev {e["sev"]}">{e["label"]}</div><div class="lw-msg">{e["msg"]}</div><div class="lw-time">{e["time"]}</div></div>' for e in all_events[:8])
         else:
             lh = '<div style="font-size:11px;color:var(--txt3)">No audit events yet.</div>'
-        st.markdown(f'<div class="obs-panel"><div class="obs-header"><div class="obs-title">Lakewatch</div><div style="display:flex;gap:8px;align-items:center"><a href="{audit_link}" target="_blank" style="font-size:10px;font-family:var(--mono);color:var(--sn);text-decoration:none">Audit Log &rarr;</a><span style="font-size:10px;font-family:var(--mono);color:var(--teal)"><span class="pulse"></span> 0 alerts</span></div></div><div class="obs-body">{lh}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="obs-panel"><div class="obs-header"><div class="obs-title">Lakewatch</div><div style="display:flex;gap:8px;align-items:center"><a href="{audit_link}" target="_blank" style="font-size:10px;font-family:var(--mono);color:var(--sn);text-decoration:none">Audit Log &rarr;</a><span style="font-size:10px;font-family:var(--mono);color:var(--teal)"><span class="pulse"></span> {alert_count} alert{"s" if alert_count != 1 else ""}</span></div></div><div class="obs-body">{lh}</div></div>', unsafe_allow_html=True)
 
     st.markdown('<div class="section-label">Workspace Deep Links</div>', unsafe_allow_html=True)
     links = [("MLflow Experiment",AL["experiment"]),("Serving Endpoint",AL["endpoint"]),("SQL Warehouse",AL["warehouse"]),("Model Registry",AL["model"]),("Vector Search",AL["vs_endpoint"]),("CRM Tables",AL["gtm_accounts"]),("Audit Table",AL["audit_agent_access"])]

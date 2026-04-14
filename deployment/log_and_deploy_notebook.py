@@ -7,7 +7,10 @@
 # COMMAND ----------
 
 import mlflow
-from mlflow.models.resources import DatabricksServingEndpoint, DatabricksFunction, DatabricksVectorSearchIndex
+from mlflow.models.resources import (
+    DatabricksServingEndpoint, DatabricksFunction, DatabricksVectorSearchIndex,
+    DatabricksSQLWarehouse, DatabricksTable,
+)
 from databricks_langchain import UCFunctionToolkit, VectorSearchRetrieverTool
 from unitycatalog.ai.langchain.toolkit import UnityCatalogTool
 
@@ -48,20 +51,22 @@ deal_stories_retriever = VectorSearchRetrieverTool(
 all_tools = list(uc_toolkit.tools) + [transcript_retriever, battlecard_retriever, deal_stories_retriever]
 
 MEMORY_LLM_ENDPOINT = "databricks-claude-haiku-4-5"
+SQL_WAREHOUSE_ID = "75fd8278393d07eb"
 
 resources = [
     DatabricksServingEndpoint(endpoint_name=LLM_ENDPOINT),
-    DatabricksServingEndpoint(endpoint_name=MEMORY_LLM_ENDPOINT),  # Memory extraction
+    DatabricksServingEndpoint(endpoint_name=MEMORY_LLM_ENDPOINT),
+    DatabricksSQLWarehouse(warehouse_id=SQL_WAREHOUSE_ID),
+    DatabricksTable(table_name=f"{CATALOG}.{SCHEMA}.memory_ae_profiles"),
+    DatabricksTable(table_name=f"{CATALOG}.{SCHEMA}.memory_account_context"),
+    DatabricksTable(table_name=f"{CATALOG}.{SCHEMA}.memory_deal_decisions"),
+    DatabricksTable(table_name=f"{CATALOG}.{SCHEMA}.audit_agent_access"),
 ]
 for tool in all_tools:
     if isinstance(tool, UnityCatalogTool):
         resources.append(DatabricksFunction(function_name=tool.uc_function_name))
     elif isinstance(tool, VectorSearchRetrieverTool):
         resources.extend(tool.resources)
-
-# Note: recall_lakebase_memory and store_lakebase_memory are custom Python tools
-# that use SQL Statement Execution API — no additional resource declarations needed
-# as they authenticate via the serving endpoint's service principal.
 
 print(f"Resources: {len(resources)}")
 
@@ -103,6 +108,9 @@ from databricks.agents import deploy
 deployment = deploy(
     model_name=MODEL_NAME,
     model_version=model_info.registered_model_version,
+    environment_vars={
+        "LAKEBASE_SQL_TOKEN": "{{secrets/gtm-agent/sql-write-token}}",
+    },
 )
 
 print(f"Endpoint: {deployment.endpoint_name}")
