@@ -2,14 +2,14 @@
 # MAGIC %md
 # MAGIC # Lakebase Memory Setup — Seed Data into Lakebase Postgres
 # MAGIC
-# MAGIC Seeds demo data into the Lakebase Postgres instance `gtm-agent-memory`
+# MAGIC Seeds demo data into a Lakebase Postgres instance
 # MAGIC using `DatabricksStore` from `databricks-langchain[memory]`.
 # MAGIC
 # MAGIC Run this as a serverless notebook job after the Lakebase instance is created.
 
 # COMMAND ----------
 
-LAKEBASE_INSTANCE_NAME = "gtm-agent-memory"
+LAKEBASE_INSTANCE_NAME = ""  # TODO: set your Lakebase instance name
 EMBEDDING_ENDPOINT = "databricks-gte-large-en"
 
 # COMMAND ----------

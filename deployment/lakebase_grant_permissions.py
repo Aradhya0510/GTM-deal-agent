@@ -2,22 +2,19 @@
 # MAGIC %md
 # MAGIC # Grant Lakebase Postgres Permissions
 # MAGIC
-# MAGIC Grants Postgres-level permissions to the Model Serving SP and Databricks Apps SPs
-# MAGIC so they can connect to the `gtm-agent-memory` Lakebase instance.
+# MAGIC Grants Postgres-level permissions to Model Serving and Databricks Apps SPs
+# MAGIC so they can connect to the Lakebase instance.
 
 # COMMAND ----------
 
-LAKEBASE_INSTANCE_NAME = "gtm-agent-memory"
+LAKEBASE_INSTANCE_NAME = ""  # TODO: set your Lakebase instance name
 
-# SPs that need access:
-# - aa2d81aa-936a-4cf2-bd4b-96a0c2b0ff55 = agents.deploy() auto-generated SP (from Model Serving logs)
-# - 51ace28c-7b7d-4396-b41d-225d404b9bd2 = gtm-deal-intelligence app SP
-# - 0d4d9c11-2fc5-4617-b6c3-71cbfa6b7138 = mission-control app SP
-
+# TODO: Add the SP IDs that need access to your Lakebase instance.
+# Find them via: databricks api get /api/2.0/permissions/serving-endpoints/<endpoint-id>
 PRINCIPALS = [
-    "aa2d81aa-936a-4cf2-bd4b-96a0c2b0ff55",
-    "51ace28c-7b7d-4396-b41d-225d404b9bd2",
-    "0d4d9c11-2fc5-4617-b6c3-71cbfa6b7138",
+    # "your-agent-sp-id",       # agents.deploy() SP (check Model Serving logs)
+    # "your-primary-app-sp-id", # primary app SP
+    # "your-showcase-app-sp-id", # showcase app SP
 ]
 
 # COMMAND ----------

@@ -4,13 +4,11 @@ A production-grade stateful tool-calling agent that showcases **14+ Databricks p
 
 **Two interfaces, one agent:**
 
-| Interface | Purpose | URL |
-|---|---|---|
-| **Primary App** | Platform capability showcase — architecture diagrams, tool call visualization, memory inspection, security dashboard | `https://gtm-deal-intelligence-2556758628403379.aws.databricksapps.com` |
-| **Showcase App** | The same agent applied to a GTM scenario — deal scoring, account research, competitive intel, outreach drafting across 6 industry verticals | `https://mission-control-2556758628403379.aws.databricksapps.com` |
-| **Agent Endpoint** | The underlying agent, callable by any client | `agents_users-aradhya_chouhan-gtm_deal_intelligence_agent` |
-
-**Workspace:** `e2-demo-west.cloud.databricks.com`
+| Interface | Purpose |
+|---|---|
+| **Primary App** | Platform capability showcase — architecture diagrams, tool call visualization, memory inspection, security dashboard |
+| **Showcase App** | The same agent applied to a GTM scenario — deal scoring, account research, competitive intel, outreach drafting across 6 industry verticals |
+| **Agent Endpoint** | The underlying agent, callable by any client |
 
 ---
 
@@ -50,13 +48,13 @@ The showcase app applies this agent to a B2B sales use case with demo data acros
 
 | # | Feature | Role in This Agent |
 |---|---|---|
-| 1 | **Lakebase Postgres** | Real Postgres instance (`gtm-agent-memory`) backing both short-term checkpoints and long-term semantic memory store |
+| 1 | **Lakebase Postgres** | Real Postgres instance backing both short-term checkpoints and long-term semantic memory store |
 | 2 | **LangGraph** | Tool-calling loop: agent node routes to tool node on tool calls, loops until complete. Compiled with Lakebase checkpointer. |
 | 3 | **ChatDatabricks** | LLM interface to Claude Sonnet 4.6 via Databricks Model Serving + AI Gateway |
 | 4 | **UC TABLE Functions** | `calculate_deal_health` and `get_account_signals` — serverless SQL functions registered in Unity Catalog, called as LangGraph tools |
 | 5 | **Vector Search** | 3 delta-sync indexes on a shared endpoint, queried via `VectorSearchRetrieverTool` for semantic retrieval |
 | 6 | **Model Serving** | Agent deployed as `ResponsesAgent` endpoint with SSE streaming, auto-scaling, and MLflow tracing |
-| 7 | **AI Gateway** | Rate limits (60 QPM), safety guardrails, PII blocking, payload logging to inference tables, usage tracking via system tables |
+| 7 | **AI Gateway** | Rate limits, safety guardrails, PII blocking, payload logging to inference tables, usage tracking via system tables |
 | 8 | **MLflow Tracing** | `mlflow.langchain.autolog()` traces every invocation — tool calls, LLM inputs/outputs, latency |
 | 9 | **Unity Catalog Governance** | Row-level security by territory, column masking on sensitive fields, function-level access control |
 | 10 | **Lakewatch** | 4 SQL alert rules: prompt injection detection, PII in output, broad account scraping, outreach volume spikes |
@@ -182,7 +180,7 @@ databricks auth profiles  # verify
 ### Step 3: Create Lakebase Postgres Instance
 
 ```bash
-databricks --profile <profile> database create-database-instance gtm-agent-memory --capacity CU_1
+databricks --profile <profile> database create-database-instance <your-instance-name> --capacity CU_1
 ```
 
 ### Step 4: Run Infrastructure Setup
@@ -226,7 +224,7 @@ Workspace-level:
 
 ```bash
 databricks --profile <profile> api patch \
-  /api/2.0/permissions/database-instances/gtm-agent-memory --json '{
+  /api/2.0/permissions/database-instances/<your-instance-name> --json '{
   "access_control_list": [{"group_name": "users", "permission_level": "CAN_USE"}]
 }'
 ```
@@ -286,11 +284,11 @@ Wait 5-10 minutes for containers to reach `DEPLOYMENT_READY`.
 
 ```bash
 databricks --profile <profile> workspace import \
-  /Workspace/Users/<you>/servicenow-gtm-agent/app/app.py \
+  /Workspace/Users/<you>/<project>/app/app.py \
   --file app/app.py --format AUTO --overwrite
 
-databricks --profile <profile> apps deploy gtm-deal-intelligence \
-  --source-code-path /Workspace/Users/<you>/servicenow-gtm-agent/app
+databricks --profile <profile> apps deploy <your-app-name> \
+  --source-code-path /Workspace/Users/<you>/<project>/app
 ```
 
 ### Step 10: Deploy the Showcase App (GTM Scenario)
@@ -298,12 +296,12 @@ databricks --profile <profile> apps deploy gtm-deal-intelligence \
 ```bash
 for f in app.py backend.py data.py styles.py components.py app.yaml requirements.txt; do
   databricks --profile <profile> workspace import \
-    /Workspace/Users/<you>/mission-control/$f \
+    /Workspace/Users/<you>/<showcase-app>/$f \
     --file showcase/$f --format AUTO --overwrite
 done
 
-databricks --profile <profile> apps deploy mission-control \
-  --source-code-path /Workspace/Users/<you>/mission-control
+databricks --profile <profile> apps deploy <your-showcase-app-name> \
+  --source-code-path /Workspace/Users/<you>/<showcase-app>
 ```
 
 ---
@@ -360,27 +358,29 @@ servicenow-gtm-agent/
 
 **UC Functions use RETURNS TABLE, not scalar RETURNS STRING.** Scalar UC SQL functions treat the body as a correlated subquery when referencing parameters. `RETURNS TABLE(result STRING)` avoids this.
 
-**Reuse warmed VS endpoints.** Creating a new VS endpoint takes 20-30 minutes. Using an existing active endpoint (like `dbdemos_vs_endpoint`) creates indexes in under 1 minute.
+**Reuse warmed VS endpoints.** Creating a new VS endpoint takes 20-30 minutes. Using an existing active endpoint creates indexes in under 1 minute.
 
 ---
 
 ## Workspace Assets
 
-| Asset | Name |
+After deployment, your workspace will contain these assets (names depend on your catalog/schema config):
+
+| Asset Type | Description |
 |---|---|
-| **Lakebase Instance** | `gtm-agent-memory` (uid: `ce28def2-7d60-4a3d-83de-a150662e70be`) |
-| **CRM Tables** | `users.aradhya_chouhan.gtm_accounts`, `gtm_contacts`, `gtm_opportunities`, `gtm_outreach_log`, `gtm_call_transcripts`, `gtm_battlecards`, `gtm_deal_stories` |
-| **Audit Table** | `users.aradhya_chouhan.audit_agent_access` |
-| **VS Endpoint** | `dbdemos_vs_endpoint` |
-| **VS Indexes** | `users.aradhya_chouhan.gtm_transcripts_idx`, `gtm_battlecards_idx`, `gtm_stories_idx` |
-| **UC Functions** | `users.aradhya_chouhan.calculate_deal_health`, `get_account_signals` |
-| **Model** | `users.aradhya_chouhan.gtm_deal_intelligence_agent` |
-| **Serving Endpoint** | `agents_users-aradhya_chouhan-gtm_deal_intelligence_agent` |
-| **AI Gateway** | `databricks-claude-sonnet-4-6` (60 QPM, safety + PII guardrails) |
-| **Embedding Model** | `databricks-gte-large-en` (1024 dim) |
-| **SQL Warehouse** | `75fd8278393d07eb` (audit writes only) |
-| **MLflow Experiment** | `/Users/aradhya.chouhan@databricks.com/gtm-deal-intelligence` |
-| **Secrets** | Scope `gtm-agent`, key `sql-write-token` |
+| **Lakebase Instance** | Postgres instance for memory (short-term checkpoints + long-term DatabricksStore) |
+| **CRM Tables** | `gtm_accounts`, `gtm_contacts`, `gtm_opportunities`, `gtm_outreach_log`, `gtm_call_transcripts`, `gtm_battlecards`, `gtm_deal_stories` |
+| **Audit Table** | `audit_agent_access` — security event logging |
+| **VS Endpoint** | Shared Vector Search endpoint |
+| **VS Indexes** | `gtm_transcripts_idx`, `gtm_battlecards_idx`, `gtm_stories_idx` |
+| **UC Functions** | `calculate_deal_health`, `get_account_signals` |
+| **Model** | Registered MLflow model in Unity Catalog |
+| **Serving Endpoint** | Auto-created by `agents.deploy()` |
+| **AI Gateway** | Configured on LLM endpoint (rate limits, guardrails, inference tables) |
+| **Embedding Model** | `databricks-gte-large-en` (1024 dim) for memory semantic search |
+| **SQL Warehouse** | Serverless warehouse for UC Function execution and audit writes |
+| **MLflow Experiment** | Traces for every agent invocation |
+| **Secrets** | PAT for Lakebase auth from Model Serving |
 
 ---
 

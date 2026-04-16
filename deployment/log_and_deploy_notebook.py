@@ -4,8 +4,7 @@
 # MAGIC
 # MAGIC Logs the agent from `agent.py`, registers in UC, and deploys to Model Serving.
 # MAGIC
-# MAGIC Memory now uses real Lakebase Postgres (`gtm-agent-memory` instance) via
-# MAGIC `databricks-langchain[memory]` — no more Delta table workarounds.
+# MAGIC Memory uses real Lakebase Postgres via `databricks-langchain[memory]`.
 
 # COMMAND ----------
 
@@ -17,10 +16,10 @@ from mlflow.models.resources import (
 from databricks_langchain import UCFunctionToolkit, VectorSearchRetrieverTool
 from unitycatalog.ai.langchain.toolkit import UnityCatalogTool
 
-CATALOG = "users"
-SCHEMA = "aradhya_chouhan"
-LLM_ENDPOINT = "databricks-claude-sonnet-4-6"
-EXPERIMENT_NAME = "/Users/aradhya.chouhan@databricks.com/gtm-deal-intelligence"
+CATALOG = "users"                    # TODO: change to your catalog
+SCHEMA = "aradhya_chouhan"           # TODO: change to your schema
+LLM_ENDPOINT = "databricks-claude-sonnet-4-6"  # TODO: change to your LLM endpoint
+EXPERIMENT_NAME = "/Users/<your-username>/gtm-deal-intelligence"  # TODO: change
 MODEL_NAME = f"{CATALOG}.{SCHEMA}.gtm_deal_intelligence_agent"
 
 mlflow.set_experiment(EXPERIMENT_NAME)
@@ -52,9 +51,9 @@ deal_stories_retriever = VectorSearchRetrieverTool(
 
 all_tools = list(uc_toolkit.tools) + [transcript_retriever, battlecard_retriever, deal_stories_retriever]
 
-MEMORY_LLM_ENDPOINT = "databricks-claude-haiku-4-5"
+MEMORY_LLM_ENDPOINT = "databricks-claude-haiku-4-5"  # TODO: change to your memory extraction LLM
 EMBEDDING_ENDPOINT = "databricks-gte-large-en"
-SQL_WAREHOUSE_ID = "75fd8278393d07eb"
+SQL_WAREHOUSE_ID = ""  # TODO: set your SQL warehouse ID (for audit table)
 
 resources = [
     DatabricksServingEndpoint(endpoint_name=LLM_ENDPOINT),
@@ -82,7 +81,7 @@ print(f"Resources: {len(resources)}")
 
 model_info = mlflow.pyfunc.log_model(
     name="gtm_agent",
-    python_model="/Workspace/Users/aradhya.chouhan@databricks.com/servicenow-gtm-agent/agent.py",
+    python_model="/Workspace/Users/<your-username>/<project>/agent.py",  # TODO: change path
     resources=resources,
     pip_requirements=[
         "mlflow>=3.6.0",
@@ -113,8 +112,8 @@ deployment = deploy(
     model_name=MODEL_NAME,
     model_version=model_info.registered_model_version,
     environment_vars={
-        "LAKEBASE_INSTANCE_NAME": "gtm-agent-memory",
-        "LAKEBASE_PAT": "{{secrets/gtm-agent/sql-write-token}}",
+        "LAKEBASE_INSTANCE_NAME": "",       # TODO: your Lakebase instance name
+        "LAKEBASE_PAT": "{{secrets/<your-scope>/<your-key>}}",  # TODO: your secret
         "DATABRICKS_EMBEDDING_ENDPOINT": "databricks-gte-large-en",
     },
 )

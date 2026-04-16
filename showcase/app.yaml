@@ -6,10 +6,10 @@ command:
 resources:
   - name: deal-intelligence-endpoint
     serving_endpoint:
-      name: agents_users-aradhya_chouhan-gtm_deal_intelligence_agent
+      name: ${SERVING_ENDPOINT_NAME}  # TODO: your agent serving endpoint name
       permission: CAN_QUERY
   - name: lakebase-memory
     database:
-      instance_name: gtm-agent-memory
+      instance_name: ${LAKEBASE_INSTANCE_NAME}  # TODO: your Lakebase instance name
       database_name: databricks_postgres
       permission: CAN_CONNECT_AND_CREATE

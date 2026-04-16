@@ -1,7 +1,7 @@
 """ServiceNow · Mission Control — Powered by Databricks"""
 
 import html as _html
-import json, time, uuid
+import json, os, time, uuid
 import streamlit as st
 
 st.set_page_config(page_title="ServiceNow · Mission Control", page_icon="🟢", layout="wide", initial_sidebar_state="expanded")
@@ -23,7 +23,8 @@ AL["endpoint"] = f"{WORKSPACE_URL}/serving-endpoints/{ENDPOINT_NAME}/invocations
 AL["model"] = f"{WORKSPACE_URL}/explore/data/models/{CATALOG}/{SCHEMA}/gtm_deal_intelligence_agent?o={WORKSPACE_ID}"
 AL["experiment"] = f"{WORKSPACE_URL}/ml/experiments?searchFilter=name%3D%27gtm-deal-intelligence%27&o={WORKSPACE_ID}"
 AL["warehouse"] = f"{WORKSPACE_URL}/sql/warehouses/{SQL_WAREHOUSE_ID}?o={WORKSPACE_ID}"
-AL["vs_endpoint"] = f"{WORKSPACE_URL}/compute/vector-search/dbdemos_vs_endpoint?o={WORKSPACE_ID}"
+VS_ENDPOINT_NAME = os.environ.get("VS_ENDPOINT_NAME", "vs_endpoint")
+AL["vs_endpoint"] = f"{WORKSPACE_URL}/compute/vector-search/{VS_ENDPOINT_NAME}?o={WORKSPACE_ID}"
 AL["ai_gateway"] = f"{WORKSPACE_URL}/serving-endpoints/{LLM_ENDPOINT}?o={WORKSPACE_ID}"
 
 st.markdown(CSS, unsafe_allow_html=True)

@@ -8,13 +8,13 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-ENDPOINT_NAME = os.environ.get("GTM_ENDPOINT", "agents_users-aradhya_chouhan-gtm_deal_intelligence_agent")
-CATALOG = "users"
-SCHEMA = "aradhya_chouhan"
-SQL_WAREHOUSE_ID = "75fd8278393d07eb"
-WORKSPACE_URL = "https://e2-demo-west.cloud.databricks.com"
-WORKSPACE_ID = "2556758628403379"
-LAKEBASE_INSTANCE_NAME = os.environ.get("LAKEBASE_INSTANCE_NAME", "gtm-agent-memory")
+ENDPOINT_NAME = os.environ.get("GTM_ENDPOINT", "")              # TODO: your serving endpoint name
+CATALOG = os.environ.get("UC_CATALOG", "users")                  # TODO: your catalog
+SCHEMA = os.environ.get("UC_SCHEMA", "")                         # TODO: your schema
+SQL_WAREHOUSE_ID = os.environ.get("SQL_WAREHOUSE_ID", "")        # TODO: your warehouse ID
+WORKSPACE_URL = os.environ.get("DATABRICKS_HOST", "")            # TODO: your workspace URL
+WORKSPACE_ID = os.environ.get("DATABRICKS_WORKSPACE_ID", "")     # TODO: your workspace ID
+LAKEBASE_INSTANCE_NAME = os.environ.get("LAKEBASE_INSTANCE_NAME", "")
 EMBEDDING_ENDPOINT = os.environ.get("DATABRICKS_EMBEDDING_ENDPOINT", "databricks-gte-large-en")
 
 AE_PROFILES = {
@@ -190,7 +190,7 @@ def tool_color(name: str) -> str:
 
 
 # ── AI Gateway stats ──
-LLM_ENDPOINT = "databricks-claude-sonnet-4-6"
+LLM_ENDPOINT = os.environ.get("LLM_ENDPOINT", "databricks-claude-sonnet-4-6")
 _gw_cache: dict[str, tuple[float, dict]] = {}
 
 def fetch_ai_gateway_stats() -> dict:
@@ -246,8 +246,9 @@ def fetch_mlflow_experiment_stats() -> dict:
             return result
     try:
         w = _get_workspace_client()
+        experiment_name = os.environ.get("MLFLOW_EXPERIMENT_NAME", "/Users/default/gtm-deal-intelligence")
         exp_resp = w.api_client.do("GET", "/api/2.0/mlflow/experiments/get-by-name",
-                                    query={"experiment_name": "/Users/aradhya.chouhan@databricks.com/gtm-deal-intelligence"})
+                                    query={"experiment_name": experiment_name})
         exp_id = exp_resp.get("experiment", {}).get("experiment_id")
         if not exp_id:
             return {"run_count": 0, "recent_runs": [], "experiment_id": None}

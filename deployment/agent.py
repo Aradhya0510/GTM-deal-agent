@@ -40,16 +40,15 @@ from typing import Annotated, Generator, Sequence, TypedDict
 logger = logging.getLogger(__name__)
 
 # ── Configuration ────────────────────────────────────────────────────────
-CATALOG = "users"
-SCHEMA = "aradhya_chouhan"
-LLM_ENDPOINT = "databricks-claude-sonnet-4-6"
-MEMORY_LLM_ENDPOINT = "databricks-claude-haiku-4-5"
-LAKEBASE_INSTANCE_NAME = os.environ.get("LAKEBASE_INSTANCE_NAME", "gtm-agent-memory")
+CATALOG = os.environ.get("UC_CATALOG", "users")
+SCHEMA = os.environ.get("UC_SCHEMA", "aradhya_chouhan")
+LLM_ENDPOINT = os.environ.get("LLM_ENDPOINT", "databricks-claude-sonnet-4-6")
+MEMORY_LLM_ENDPOINT = os.environ.get("MEMORY_LLM_ENDPOINT", "databricks-claude-haiku-4-5")
+LAKEBASE_INSTANCE_NAME = os.environ.get("LAKEBASE_INSTANCE_NAME", "")
 LAKEBASE_ENDPOINT = os.environ.get("LAKEBASE_AUTOSCALING_ENDPOINT", "")
 EMBEDDING_ENDPOINT = os.environ.get("DATABRICKS_EMBEDDING_ENDPOINT", "databricks-gte-large-en")
 
-# Audit table still uses SQL warehouse (Delta table, not Lakebase)
-SQL_WAREHOUSE_ID = "75fd8278393d07eb"
+SQL_WAREHOUSE_ID = os.environ.get("SQL_WAREHOUSE_ID", "")
 
 # ── Lakebase Postgres: CheckpointSaver + DatabricksStore ──────────────────
 _LAKEBASE_AVAILABLE = False
@@ -65,7 +64,7 @@ try:
     # Use explicit PAT for Lakebase auth — the auto-generated SP from agents.deploy()
     # is ephemeral (new per model version) and doesn't have a Postgres role.
     _lakebase_token = os.environ.get("LAKEBASE_PAT")
-    _lakebase_host = os.environ.get("DATABRICKS_HOST", "https://e2-demo-west.cloud.databricks.com")
+    _lakebase_host = os.environ.get("DATABRICKS_HOST", "")
     if _lakebase_token:
         _lb_wc = _LBWorkspaceClient(host=_lakebase_host, token=_lakebase_token)
         _lb_kwargs["workspace_client"] = _lb_wc
