@@ -1,5 +1,6 @@
 """Rendering components — X-Ray, DAG, streaming tool cards."""
 
+import html as _html
 import json
 import streamlit as st
 from backend import classify_tool, tool_type_label, tool_color
@@ -43,7 +44,7 @@ def render_xray(tool_calls, total_latency, thread_id):
             args_d = str(tc.get("arguments", ""))[:120]
         out_raw = str(tc.get("output", "") or "")
         out_d = out_raw[:250] + ("..." if len(out_raw) > 250 else "")
-        tool_html += f'<div class="xr-tool {cat}"><div class="xr-tool-hdr"><span class="rflag {color}">{tool_type_label(tc["name"])}</span><span class="xr-tool-name">{tc["name"]}</span><span class="xr-tool-ms">{per_tool_t*1000:.0f}ms</span></div><div class="xr-io"><span class="xr-io-label in">IN</span><span>{args_d}</span></div><div class="xr-io"><span class="xr-io-label out">OUT</span><span>{out_d}</span></div></div>'
+        tool_html += f'<div class="xr-tool {cat}"><div class="xr-tool-hdr"><span class="rflag {color}">{tool_type_label(tc["name"])}</span><span class="xr-tool-name">{_html.escape(tc["name"])}</span><span class="xr-tool-ms">{per_tool_t*1000:.0f}ms</span></div><div class="xr-io"><span class="xr-io-label in">IN</span><span>{_html.escape(args_d)}</span></div><div class="xr-io"><span class="xr-io-label out">OUT</span><span>{_html.escape(out_d)}</span></div></div>'
 
     st.markdown(f'<div class="xr-panel"><div class="xr-header"><span class="xr-title">AGENT X-RAY</span><span class="xr-meta">thread · {thread_id[:6]} | {total_latency:.1f}s | {n} tools</span></div><div class="xr-flow">{flow_html}</div><div class="xr-tools">{tool_html}</div><div class="xr-footer"><span class="xr-stat"><span class="uc-dot" style="background:var(--teal)"></span>GUARDRAIL ✓</span><span class="xr-stat"><span class="uc-dot" style="background:var(--violet)"></span>MEMORY {"loaded" if has["memory"] else "skip"}</span><span class="xr-stat"><span class="uc-dot" style="background:var(--cyan)"></span>TOOLS {n}</span><span class="xr-stat"><span class="uc-dot" style="background:var(--amber)"></span>LATENCY {total_latency:.1f}s</span></div></div>', unsafe_allow_html=True)
 
@@ -83,7 +84,7 @@ def render_dag(active_tools=None, scanning=False):
       {conn(has_active)}
       <div class="dag-row">{n("guard_pre","teal","🛡️","Pre-Guardrail","Injection scan · 12 patterns","Inline")}</div>
       {conn(has_active)}
-      <div class="dag-row">{n("memory","violet","🧠","Lakebase Memory","recall → 3 Delta tables","SQL Warehouse")}</div>
+      <div class="dag-row">{n("memory","violet","🧠","Lakebase Memory","recall → Lakebase Postgres","Lakebase")}</div>
       {conn("memory" in active)}
       <div class="dag-row" style="gap:12px">
         {n("uc_health","amber","⚙️","UC: Deal Health","calculate_deal_health","UC Function")}
@@ -93,7 +94,7 @@ def render_dag(active_tools=None, scanning=False):
         {n("vs_stories","cyan","📖","VS: Stories","gtm_stories_idx","Vector Search")}
       </div>
       {conn(has_active)}
-      <div class="dag-row">{n("llm","teal","🤖","Claude Sonnet 4.6","Reasoning + generation","LLM Gateway")}</div>
+      <div class="dag-row">{n("llm","teal","🤖","Claude Sonnet 4.6","AI Gateway · guardrails · rate limits · logging","AI Gateway")}</div>
       {conn(has_active)}
       <div class="dag-row">{n("guard_post","teal","🛡️","Post-Guardrail","PII scan · email/phone/SSN","Inline")}</div>
       {conn(has_active)}

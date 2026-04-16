@@ -3,6 +3,9 @@
 # MAGIC # GTM Deal Intelligence Agent — Log & Deploy
 # MAGIC
 # MAGIC Logs the agent from `agent.py`, registers in UC, and deploys to Model Serving.
+# MAGIC
+# MAGIC Memory now uses real Lakebase Postgres (`gtm-agent-memory` instance) via
+# MAGIC `databricks-langchain[memory]` — no more Delta table workarounds.
 
 # COMMAND ----------
 
@@ -30,7 +33,6 @@ print(f"Model: {MODEL_NAME}")
 
 # COMMAND ----------
 
-# Recreate the same tools to collect their resources
 uc_toolkit = UCFunctionToolkit(function_names=[
     f"{CATALOG}.{SCHEMA}.calculate_deal_health",
     f"{CATALOG}.{SCHEMA}.get_account_signals",
@@ -51,16 +53,17 @@ deal_stories_retriever = VectorSearchRetrieverTool(
 all_tools = list(uc_toolkit.tools) + [transcript_retriever, battlecard_retriever, deal_stories_retriever]
 
 MEMORY_LLM_ENDPOINT = "databricks-claude-haiku-4-5"
+EMBEDDING_ENDPOINT = "databricks-gte-large-en"
 SQL_WAREHOUSE_ID = "75fd8278393d07eb"
 
 resources = [
     DatabricksServingEndpoint(endpoint_name=LLM_ENDPOINT),
     DatabricksServingEndpoint(endpoint_name=MEMORY_LLM_ENDPOINT),
+    DatabricksServingEndpoint(endpoint_name=EMBEDDING_ENDPOINT),
+    # SQL warehouse still needed for audit_agent_access Delta table
     DatabricksSQLWarehouse(warehouse_id=SQL_WAREHOUSE_ID),
-    DatabricksTable(table_name=f"{CATALOG}.{SCHEMA}.memory_ae_profiles"),
-    DatabricksTable(table_name=f"{CATALOG}.{SCHEMA}.memory_account_context"),
-    DatabricksTable(table_name=f"{CATALOG}.{SCHEMA}.memory_deal_decisions"),
     DatabricksTable(table_name=f"{CATALOG}.{SCHEMA}.audit_agent_access"),
+    # Memory tables are now in Lakebase Postgres, not Delta — no DatabricksTable needed
 ]
 for tool in all_tools:
     if isinstance(tool, UnityCatalogTool):
@@ -83,8 +86,9 @@ model_info = mlflow.pyfunc.log_model(
     resources=resources,
     pip_requirements=[
         "mlflow>=3.6.0",
-        "databricks-langchain",
+        "databricks-langchain[memory]>=0.17.0",
         "langgraph>=0.3",
+        "langgraph-checkpoint-postgres>=2.0.5",
         "databricks-agents",
         "pydantic",
     ],
@@ -109,7 +113,9 @@ deployment = deploy(
     model_name=MODEL_NAME,
     model_version=model_info.registered_model_version,
     environment_vars={
-        "LAKEBASE_SQL_TOKEN": "{{secrets/gtm-agent/sql-write-token}}",
+        "LAKEBASE_INSTANCE_NAME": "gtm-agent-memory",
+        "LAKEBASE_PAT": "{{secrets/gtm-agent/sql-write-token}}",
+        "DATABRICKS_EMBEDDING_ENDPOINT": "databricks-gte-large-en",
     },
 )
 

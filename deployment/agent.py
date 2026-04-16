@@ -5,18 +5,18 @@ This file is loaded by MLflow Model Serving. It contains ONLY the agent
 definition and set_model() — NO logging, testing, or deployment code.
 
 Memory Architecture:
-  Short-term: Lakebase CheckpointSaver (cross-replica session persistence)
-              Falls back to MemorySaver if Lakebase not available
-  Long-term:  Lakebase memory tools — recall_lakebase_memory / store_lakebase_memory
-              Backed by Delta tables queried via SQL Statement Execution API
+  Short-term: Lakebase CheckpointSaver → Postgres (cross-replica session persistence)
+              Falls back to MemorySaver if Lakebase instance not configured
+  Long-term:  Lakebase DatabricksStore → Postgres with semantic search (via embeddings)
+              recall_lakebase_memory / store_lakebase_memory as visible LangGraph tools
 
-Databricks tech: LangGraph + ChatDatabricks + UC Functions + Vector Search + Lakebase + SQL API
+Databricks tech: LangGraph + ChatDatabricks + UC Functions + Vector Search + Lakebase Postgres
 """
 
 import json
 import logging
+import os
 import re
-import time
 import uuid
 
 import mlflow
@@ -39,32 +39,79 @@ from typing import Annotated, Generator, Sequence, TypedDict
 
 logger = logging.getLogger(__name__)
 
-# ── Lakebase CheckpointSaver (with MemorySaver fallback) ──────────────────
-try:
-    from databricks.agents.lakebase import CheckpointSaver
-    _checkpointer = CheckpointSaver()
-    _LAKEBASE_CHECKPOINT = True
-    logger.info("Lakebase CheckpointSaver loaded — cross-replica session memory active")
-except (ImportError, Exception) as e:
-    from langgraph.checkpoint.memory import MemorySaver
-    _checkpointer = MemorySaver()
-    _LAKEBASE_CHECKPOINT = False
-    logger.info("Lakebase CheckpointSaver not available (%s) — using MemorySaver fallback", e)
-
-# ── SQL API for Lakebase memory tables ────────────────────────────────────
-try:
-    from databricks.sdk import WorkspaceClient
-    _SQL_AVAILABLE = True
-except ImportError:
-    _SQL_AVAILABLE = False
-    logger.info("databricks.sdk not available — Lakebase memory tools disabled")
-
 # ── Configuration ────────────────────────────────────────────────────────
 CATALOG = "users"
 SCHEMA = "aradhya_chouhan"
 LLM_ENDPOINT = "databricks-claude-sonnet-4-6"
 MEMORY_LLM_ENDPOINT = "databricks-claude-haiku-4-5"
-SQL_WAREHOUSE_ID = "75fd8278393d07eb"  # Shared Endpoint on e2-demo-west
+LAKEBASE_INSTANCE_NAME = os.environ.get("LAKEBASE_INSTANCE_NAME", "gtm-agent-memory")
+LAKEBASE_ENDPOINT = os.environ.get("LAKEBASE_AUTOSCALING_ENDPOINT", "")
+EMBEDDING_ENDPOINT = os.environ.get("DATABRICKS_EMBEDDING_ENDPOINT", "databricks-gte-large-en")
+
+# Audit table still uses SQL warehouse (Delta table, not Lakebase)
+SQL_WAREHOUSE_ID = "75fd8278393d07eb"
+
+# ── Lakebase Postgres: CheckpointSaver + DatabricksStore ──────────────────
+_LAKEBASE_AVAILABLE = False
+_checkpointer = None
+_memory_store = None
+
+try:
+    from databricks_langchain import CheckpointSaver, DatabricksStore
+    from databricks.sdk import WorkspaceClient as _LBWorkspaceClient
+
+    _lb_kwargs = {"instance_name": LAKEBASE_INSTANCE_NAME}
+
+    # Use explicit PAT for Lakebase auth — the auto-generated SP from agents.deploy()
+    # is ephemeral (new per model version) and doesn't have a Postgres role.
+    _lakebase_token = os.environ.get("LAKEBASE_PAT")
+    _lakebase_host = os.environ.get("DATABRICKS_HOST", "https://e2-demo-west.cloud.databricks.com")
+    if _lakebase_token:
+        _lb_wc = _LBWorkspaceClient(host=_lakebase_host, token=_lakebase_token)
+        _lb_kwargs["workspace_client"] = _lb_wc
+        logger.info("Using explicit PAT for Lakebase connection (user-level auth)")
+
+    _checkpointer = CheckpointSaver(**_lb_kwargs)
+    _memory_store = DatabricksStore(
+        **_lb_kwargs,
+        embedding_endpoint=EMBEDDING_ENDPOINT,
+        embedding_dims=1024,
+    )
+    _memory_store.setup()
+    _checkpointer.setup()
+    _LAKEBASE_AVAILABLE = True
+    logger.info(
+        "Lakebase Postgres connected — %s, CheckpointSaver + DatabricksStore active",
+        LAKEBASE_INSTANCE_NAME,
+    )
+except Exception as e:
+    import traceback
+    logger.error("Lakebase Postgres init FAILED — falling back to MemorySaver. Error: %s\n%s", e, traceback.format_exc())
+    from langgraph.checkpoint.memory import MemorySaver
+    _checkpointer = MemorySaver()
+    _memory_store = None
+
+# ── SQL helper (only for audit_agent_access Delta table) ──────────────────
+try:
+    from databricks.sdk import WorkspaceClient
+    _SQL_AVAILABLE = True
+except ImportError:
+    _SQL_AVAILABLE = False
+
+def _run_audit_sql(statement: str) -> bool:
+    """Execute SQL for audit logging only. Returns True on success."""
+    if not _SQL_AVAILABLE:
+        return False
+    try:
+        w = WorkspaceClient()
+        resp = w.statement_execution.execute_statement(
+            statement=statement, warehouse_id=SQL_WAREHOUSE_ID, wait_timeout="10s",
+        )
+        return bool(resp.status and resp.status.state and resp.status.state.value == "SUCCEEDED")
+    except Exception:
+        logger.warning("Audit SQL execution error", exc_info=True)
+        return False
+
 
 SYSTEM_PROMPT = """You are an expert GTM Deal Intelligence assistant for B2B SaaS account executives.
 
@@ -129,80 +176,13 @@ Return a JSON object with exactly three keys:
 Return ONLY valid JSON. No preamble, no explanation, no markdown fencing."""
 
 
-# ── SQL helper ────────────────────────────────────────────────────────────
-class _SqlResult:
-    """Wraps SQL execution outcome so callers can distinguish success from failure.
-
-    Truthiness checks row count (backward compat with recall code that does `if rows:`).
-    Use `.ok` explicitly for DML success checks in store operations.
-    """
-    __slots__ = ("ok", "rows", "error")
-
-    def __init__(self, ok: bool, rows: list[dict] | None = None, error: str = ""):
-        self.ok = ok
-        self.rows = rows or []
-        self.error = error
-
-    def __iter__(self):
-        return iter(self.rows)
-
-    def __len__(self):
-        return len(self.rows)
-
-    def __getitem__(self, idx):
-        return self.rows[idx]
-
-    def __bool__(self):
-        return bool(self.rows)
-
-
-def _get_sql_client():
-    """Get a WorkspaceClient for SQL operations.
-
-    Uses explicit PAT credentials (via LAKEBASE_SQL_TOKEN env var) for write operations,
-    because the auto-auth passthrough SP only gets read access to DatabricksTable resources.
-    Falls back to default WorkspaceClient (auto-auth) if no explicit token is set.
-    """
-    import os
-    token = os.environ.get("LAKEBASE_SQL_TOKEN")
-    host = os.environ.get("DATABRICKS_HOST", "https://e2-demo-west.cloud.databricks.com")
-    if token:
-        return WorkspaceClient(host=host, token=token)
-    return WorkspaceClient()
-
-
-def _run_sql(statement: str) -> _SqlResult:
-    """Execute SQL via Databricks SQL Statement Execution API (Lakebase backend)."""
-    if not _SQL_AVAILABLE:
-        return _SqlResult(False, error="SDK not available")
-    try:
-        w = _get_sql_client()
-        resp = w.statement_execution.execute_statement(
-            statement=statement,
-            warehouse_id=SQL_WAREHOUSE_ID,
-            wait_timeout="30s",
-        )
-        if resp.status and resp.status.state and resp.status.state.value == "SUCCEEDED":
-            if not resp.result or not resp.result.data_array:
-                return _SqlResult(True, [])
-            columns = [c.name for c in resp.manifest.schema.columns]
-            return _SqlResult(True, [dict(zip(columns, row)) for row in resp.result.data_array])
-        else:
-            err = str(resp.status) if resp.status else "unknown"
-            logger.warning("SQL execution failed: %s", err)
-            return _SqlResult(False, error=err)
-    except Exception as e:
-        logger.warning("SQL execution error", exc_info=True)
-        return _SqlResult(False, error=str(e))
-
-
 # ═══════════════════════════════════════════════════════════════════════════
-#  LAKEBASE MEMORY TOOLS — visible as tool calls in the agent output
+#  LAKEBASE MEMORY TOOLS — backed by real Lakebase Postgres via DatabricksStore
 # ═══════════════════════════════════════════════════════════════════════════
 
 @tool
 def recall_lakebase_memory(ae_id: str, account_id: str = "") -> str:
-    """Load AE preferences, account context, and deal decisions from Lakebase memory tables.
+    """Load AE preferences, account context, and deal decisions from Lakebase memory.
 
     ALWAYS call this tool FIRST before answering any question. It retrieves:
     - AE email preferences (tone, length, CTA, competitors to avoid)
@@ -213,107 +193,51 @@ def recall_lakebase_memory(ae_id: str, account_id: str = "") -> str:
         ae_id: The AE identifier (e.g., 'ae-jamie')
         account_id: Optional account ID to load account-specific context
     """
-    if not _SQL_AVAILABLE or not ae_id:
+    if not ae_id:
+        return json.dumps({"status": "no_memory", "message": "No AE ID provided."})
+    if not _LAKEBASE_AVAILABLE or not _memory_store:
         return json.dumps({
             "status": "no_memory",
-            "message": "No AE ID provided or Lakebase not available. Proceeding without memory.",
+            "message": f"Lakebase not available. LAKEBASE_AVAILABLE={_LAKEBASE_AVAILABLE}, "
+                       f"instance={LAKEBASE_INSTANCE_NAME}, endpoint={LAKEBASE_ENDPOINT}",
         })
 
-    result = {"ae_id": ae_id, "preferences": {}, "account_context": [], "deal_decisions": []}
-    safe_ae = ae_id.replace("'", "''")
+    result = {"ae_id": ae_id, "preferences": [], "account_context": [], "deal_decisions": []}
 
-    # --- AE Preferences ---
-    rows = _run_sql(
-        f"SELECT email_style, outreach_prefs, avoid_competitors, raw_preferences "
-        f"FROM {CATALOG}.{SCHEMA}.memory_ae_profiles "
-        f"WHERE ae_id = '{safe_ae}'"
-    )
-    if not rows.ok:
-        logger.error("recall_lakebase_memory SQL failed for ae_profiles: %s", rows.error)
-        result["sql_error"] = f"Could not read ae_profiles: {rows.error}"
-    if rows:
-        prefs = rows[0]
-        email_style = prefs.get("email_style") or "{}"
-        if isinstance(email_style, str):
-            try:
-                email_style = json.loads(email_style)
-            except json.JSONDecodeError:
-                email_style = {}
+    try:
+        # Search AE preferences
+        ae_namespace = ("ae_memories", ae_id)
+        pref_results = _memory_store.search(ae_namespace, query="preferences style tone email", limit=10)
+        for item in pref_results:
+            result["preferences"].append({"key": item.key, **item.value})
 
-        outreach = prefs.get("outreach_prefs") or "{}"
-        if isinstance(outreach, str):
-            try:
-                outreach = json.loads(outreach)
-            except json.JSONDecodeError:
-                outreach = {}
+        # Search account context if account_id provided
+        if account_id:
+            acct_namespace = ("account_memories", account_id)
+            ctx_results = _memory_store.search(
+                acct_namespace, query="context champion budget competitor timeline", limit=10
+            )
+            for item in ctx_results:
+                result["account_context"].append({"key": item.key, **item.value})
 
-        avoid = prefs.get("avoid_competitors")
-        if avoid and isinstance(avoid, str):
-            try:
-                avoid = json.loads(avoid)
-            except json.JSONDecodeError:
-                avoid = [avoid]
+            # Search deal decisions
+            dec_namespace = ("deal_decisions", ae_id)
+            dec_results = _memory_store.search(
+                dec_namespace, query=f"decisions recommendations {account_id}", limit=5
+            )
+            for item in dec_results:
+                result["deal_decisions"].append({"key": item.key, **item.value})
 
-        raw = prefs.get("raw_preferences")
-        if raw and isinstance(raw, str):
-            try:
-                raw = json.loads(raw)
-            except json.JSONDecodeError:
-                raw = []
-
-        result["preferences"] = {
-            "email_style": email_style,
-            "outreach_prefs": outreach,
-            "avoid_competitors": [a for a in (avoid or []) if a],
-            "raw_preferences": (raw or [])[-5:],
-        }
-
-    # --- Account Context (last 90 days, high confidence) ---
-    if account_id:
-        safe_acct = account_id.replace("'", "''")
-        ctx_rows = _run_sql(
-            f"SELECT context_type, content, confidence, extracted_at "
-            f"FROM {CATALOG}.{SCHEMA}.memory_account_context "
-            f"WHERE account_id = '{safe_acct}' "
-            f"AND extracted_at > date_sub(current_timestamp(), 90) "
-            f"AND confidence > 0.80 "
-            f"ORDER BY extracted_at DESC LIMIT 10"
-        )
-        result["account_context"] = [
-            {
-                "type": r["context_type"],
-                "content": r["content"],
-                "confidence": r.get("confidence", ""),
-                "date": str(r.get("extracted_at", ""))[:10],
-            }
-            for r in ctx_rows
-        ]
-
-        # --- Recent Deal Decisions (last 30 days) ---
-        dec_rows = _run_sql(
-            f"SELECT d.opp_id, d.recommendation, d.ae_action, d.ae_feedback "
-            f"FROM {CATALOG}.{SCHEMA}.memory_deal_decisions d "
-            f"JOIN {CATALOG}.{SCHEMA}.gtm_opportunities o ON d.opp_id = o.opp_id "
-            f"WHERE o.account_id = '{safe_acct}' "
-            f"AND d.decided_at > date_sub(current_timestamp(), 30) "
-            f"ORDER BY d.decided_at DESC LIMIT 5"
-        )
-        result["deal_decisions"] = [
-            {
-                "opp_id": r["opp_id"],
-                "recommendation": r.get("recommendation", "")[:80],
-                "ae_action": r["ae_action"],
-                "ae_feedback": r.get("ae_feedback", ""),
-            }
-            for r in dec_rows
-        ]
+    except Exception as e:
+        logger.error("recall_lakebase_memory failed: %s", e, exc_info=True)
+        result["error"] = str(e)
 
     return json.dumps(result, indent=2)
 
 
 @tool
 def store_lakebase_memory(ae_id: str, fact_type: str, content: str, account_id: str = "", confidence: float = 0.9) -> str:
-    """Store a new fact or preference in Lakebase memory tables for future sessions.
+    """Store a new fact or preference in Lakebase memory for future sessions.
 
     Call this when the AE shares a new preference, corrects the agent, or provides
     account context that should be remembered across sessions.
@@ -325,53 +249,41 @@ def store_lakebase_memory(ae_id: str, fact_type: str, content: str, account_id: 
         account_id: Account ID (required for account_context type)
         confidence: Confidence score 0-1 (default 0.9)
     """
-    if not _SQL_AVAILABLE or not ae_id:
+    if not _LAKEBASE_AVAILABLE or not _memory_store or not ae_id:
         return json.dumps({"status": "error", "message": "Lakebase not available"})
 
-    safe_ae = ae_id.replace("'", "''")
-    safe_content = content[:500].replace("'", "''")
+    try:
+        memory_key = f"{fact_type}_{uuid.uuid4().hex[:8]}"
+        memory_data = {
+            "type": fact_type,
+            "content": content,
+            "ae_id": ae_id,
+            "confidence": confidence,
+        }
 
-    if fact_type == "ae_preference":
-        res = _run_sql(
-            f"MERGE INTO {CATALOG}.{SCHEMA}.memory_ae_profiles t "
-            f"USING (SELECT '{safe_ae}' AS ae_id) s ON t.ae_id = s.ae_id "
-            f"WHEN MATCHED THEN UPDATE SET "
-            f"  raw_preferences = array_append(t.raw_preferences, '{safe_content}'), "
-            f"  updated_at = current_timestamp() "
-            f"WHEN NOT MATCHED THEN INSERT (ae_id, raw_preferences, updated_at) "
-            f"VALUES ('{safe_ae}', array('{safe_content}'), current_timestamp())"
-        )
-        if not res.ok:
-            logger.error("store_lakebase_memory ae_preference FAILED: %s", res.error)
-            return json.dumps({"status": "error", "message": f"SQL write failed: {res.error}"})
-        return json.dumps({"status": "stored", "type": "ae_preference", "content": content})
+        if fact_type == "ae_preference":
+            namespace = ("ae_memories", ae_id)
+            if ":" in content:
+                pref_type, pref_value = content.split(":", 1)
+                memory_data["preference_type"] = pref_type.strip()
+                memory_data["preference_value"] = pref_value.strip()
 
-    elif fact_type == "account_context" and account_id:
-        safe_acct = account_id.replace("'", "''")
-        res = _run_sql(
-            f"INSERT INTO {CATALOG}.{SCHEMA}.memory_account_context "
-            f"(account_id, context_type, content, source_thread_id, ae_id, confidence, extracted_at) "
-            f"VALUES ('{safe_acct}', 'agent_noted', '{safe_content}', 'live', '{safe_ae}', "
-            f"{confidence}, current_timestamp())"
-        )
-        if not res.ok:
-            logger.error("store_lakebase_memory account_context FAILED: %s", res.error)
-            return json.dumps({"status": "error", "message": f"SQL write failed: {res.error}"})
-        return json.dumps({"status": "stored", "type": "account_context", "account_id": account_id})
+        elif fact_type == "account_context" and account_id:
+            namespace = ("account_memories", account_id)
+            memory_data["account_id"] = account_id
 
-    elif fact_type == "deal_decision":
-        dec_id = str(uuid.uuid4())
-        res = _run_sql(
-            f"INSERT INTO {CATALOG}.{SCHEMA}.memory_deal_decisions "
-            f"(decision_id, opp_id, ae_id, session_thread_id, recommendation, ae_action, ae_feedback, decided_at) "
-            f"VALUES ('{dec_id}', 'live', '{safe_ae}', 'live', '{safe_content}', 'noted', '', current_timestamp())"
-        )
-        if not res.ok:
-            logger.error("store_lakebase_memory deal_decision FAILED: %s", res.error)
-            return json.dumps({"status": "error", "message": f"SQL write failed: {res.error}"})
-        return json.dumps({"status": "stored", "type": "deal_decision"})
+        elif fact_type == "deal_decision":
+            namespace = ("deal_decisions", ae_id)
 
-    return json.dumps({"status": "error", "message": f"Unknown fact_type: {fact_type}"})
+        else:
+            return json.dumps({"status": "error", "message": f"Unknown fact_type: {fact_type}"})
+
+        _memory_store.put(namespace, memory_key, memory_data)
+        return json.dumps({"status": "stored", "type": fact_type, "key": memory_key})
+
+    except Exception as e:
+        logger.error("store_lakebase_memory failed: %s", e, exc_info=True)
+        return json.dumps({"status": "error", "message": str(e)})
 
 
 # ── UC Function + Vector Search Tools ────────────────────────────────────
@@ -422,8 +334,8 @@ def should_continue(state):
     return "end"
 
 
-def _build_graph(checkpointer=None):
-    """Build the LangGraph agent with Lakebase checkpointer."""
+def _build_graph(checkpointer=None, store=None):
+    """Build the LangGraph agent with Lakebase checkpointer and store."""
 
     def call_model(state):
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(state["messages"])
@@ -435,19 +347,15 @@ def _build_graph(checkpointer=None):
     graph_builder.set_entry_point("agent")
     graph_builder.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": END})
     graph_builder.add_edge("tools", "agent")
-    return graph_builder.compile(checkpointer=checkpointer)
-
-
-# Stateless fallback graph
-_fallback_graph = _build_graph()
+    return graph_builder.compile(checkpointer=checkpointer, store=store)
 
 
 # ── Long-term memory: extract + store (end-of-session batch) ─────────────
 def _extract_and_store_memories(
     thread_id: str, ae_id: str, conversation: list[dict]
 ) -> None:
-    """Run haiku extraction agent on the conversation and write to Lakebase memory tables."""
-    if not _SQL_AVAILABLE or not ae_id:
+    """Run haiku extraction agent on the conversation and write to Lakebase Postgres."""
+    if not _LAKEBASE_AVAILABLE or not _memory_store or not ae_id:
         return
     try:
         conversation_text = "\n".join(
@@ -465,47 +373,55 @@ def _extract_and_store_memories(
         ])
 
         extracted = json.loads(result.content)
-        safe_ae = ae_id.replace("'", "''")
 
         for pref in extracted.get("ae_preferences", []):
             if pref.get("confidence", 0) < 0.75:
                 continue
-            val = f"{pref['preference_type']}:{pref['value']}".replace("'", "''")
-            _run_sql(
-                f"MERGE INTO {CATALOG}.{SCHEMA}.memory_ae_profiles t "
-                f"USING (SELECT '{safe_ae}' AS ae_id) s ON t.ae_id = s.ae_id "
-                f"WHEN MATCHED THEN UPDATE SET "
-                f"  raw_preferences = array_append(t.raw_preferences, '{val}'), "
-                f"  updated_at = current_timestamp() "
-                f"WHEN NOT MATCHED THEN INSERT (ae_id, raw_preferences, updated_at) "
-                f"VALUES ('{safe_ae}', array('{val}'), current_timestamp())"
+            key = f"ae_pref_{uuid.uuid4().hex[:8]}"
+            _memory_store.put(
+                ("ae_memories", ae_id), key,
+                {
+                    "type": "ae_preference",
+                    "preference_type": pref["preference_type"],
+                    "preference_value": pref["value"],
+                    "content": f"{pref['preference_type']}:{pref['value']}",
+                    "confidence": pref["confidence"],
+                    "source_thread": thread_id,
+                },
             )
 
         for ctx in extracted.get("account_context", []):
             if ctx.get("confidence", 0) < 0.80:
                 continue
-            safe_acct = ctx["account_id"].replace("'", "''")
-            safe_content = ctx["content"].replace("'", "''")
-            safe_type = ctx["context_type"].replace("'", "''")
-            _run_sql(
-                f"INSERT INTO {CATALOG}.{SCHEMA}.memory_account_context "
-                f"(account_id, context_type, content, source_thread_id, ae_id, confidence, extracted_at) "
-                f"VALUES ('{safe_acct}', '{safe_type}', '{safe_content}', '{thread_id}', '{safe_ae}', "
-                f"{ctx['confidence']}, current_timestamp())"
+            key = f"ctx_{uuid.uuid4().hex[:8]}"
+            _memory_store.put(
+                ("account_memories", ctx["account_id"]), key,
+                {
+                    "type": "account_context",
+                    "context_type": ctx["context_type"],
+                    "content": ctx["content"],
+                    "confidence": ctx["confidence"],
+                    "ae_id": ae_id,
+                    "source_thread": thread_id,
+                },
             )
 
         for dec in extracted.get("deal_decisions", []):
-            safe_rec = dec["recommendation"].replace("'", "''")
-            safe_fb = dec.get("ae_feedback", "").replace("'", "''")
-            dec_id = str(uuid.uuid4())
-            _run_sql(
-                f"INSERT INTO {CATALOG}.{SCHEMA}.memory_deal_decisions "
-                f"(decision_id, opp_id, ae_id, session_thread_id, recommendation, ae_action, ae_feedback, decided_at) "
-                f"VALUES ('{dec_id}', '{dec['opp_id']}', '{safe_ae}', '{thread_id}', "
-                f"'{safe_rec}', '{dec['ae_action']}', '{safe_fb}', current_timestamp())"
+            key = f"dec_{uuid.uuid4().hex[:8]}"
+            _memory_store.put(
+                ("deal_decisions", ae_id), key,
+                {
+                    "type": "deal_decision",
+                    "opp_id": dec.get("opp_id", ""),
+                    "recommendation": dec["recommendation"],
+                    "ae_action": dec["ae_action"],
+                    "ae_feedback": dec.get("ae_feedback", ""),
+                    "content": f"{dec['ae_action']}: {dec['recommendation']}",
+                    "source_thread": thread_id,
+                },
             )
 
-        logger.info("Memories extracted and stored in Lakebase for thread %s", thread_id)
+        logger.info("Memories extracted and stored in Lakebase Postgres for thread %s", thread_id)
     except Exception:
         logger.warning("Memory extraction failed — skipping", exc_info=True)
 
@@ -559,14 +475,12 @@ def _log_security_event(event_type: str, ae_id: str, thread_id: str, detail: str
         safe_ae = ae_id.replace("'", "''")
         safe_detail = detail[:500].replace("'", "''")
         event_id = str(uuid.uuid4())
-        res = _run_sql(
+        _run_audit_sql(
             f"INSERT INTO {CATALOG}.{SCHEMA}.audit_agent_access "
             f"(event_id, event_type, ae_id, thread_id, detail, created_at) "
             f"VALUES ('{event_id}', '{event_type}', '{safe_ae}', '{thread_id}', "
             f"'{safe_detail}', current_timestamp())"
         )
-        if not res.ok:
-            logger.error("Failed to write audit event '%s': %s", event_type, res.error)
     except Exception:
         logger.warning("Failed to log security event", exc_info=True)
 
@@ -623,11 +537,10 @@ class GTMDealAgent(ResponsesAgent):
             yield ResponsesAgentStreamEvent(type="response.output_item.done", item=blocked_item)
             return
 
-        # ── Run LangGraph agent (memory loaded via recall_lakebase_memory tool) ──
-        graph = _build_graph(checkpointer=_checkpointer)
+        # ── Run LangGraph agent with Lakebase checkpointer + store ──
+        graph = _build_graph(checkpointer=_checkpointer, store=_memory_store)
         config = {"configurable": {"thread_id": thread_id}}
 
-        # Collect output for post-response PII check
         all_events = []
         for event in _stream_graph(graph, messages, config):
             all_events.append(event)

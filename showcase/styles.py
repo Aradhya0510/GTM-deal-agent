@@ -149,7 +149,7 @@ div[data-baseweb="select"]>div>div{color:#fff!important}
 .obs-panel{border:1px solid var(--b2);border-radius:8px;overflow:hidden;margin-bottom:8px}
 .obs-header{padding:12px 16px;border-bottom:1px solid var(--b2);display:flex;align-items:center;justify-content:space-between;background:var(--ink2)}
 .obs-title{font-family:var(--display);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--txt2)}
-.obs-body{padding:14px}
+.obs-body{padding:14px;max-height:280px;overflow-y:auto}
 .eval-metric-row{display:flex;align-items:center;gap:12px;margin-bottom:8px}
 .eval-label{font-size:11px;color:var(--txt2);font-family:var(--mono);min-width:130px}
 .eval-track{flex:1;height:8px;background:var(--b2);border-radius:4px;overflow:hidden}.eval-fill{height:100%;border-radius:4px}
@@ -243,6 +243,14 @@ div[data-baseweb="select"]>div>div{color:#fff!important}
 .asset-table td{padding:8px 10px;border-bottom:1px solid var(--b);font-size:12px;color:#fff;font-family:var(--mono)}
 .asset-table tr:hover td{background:rgba(255,255,255,.02)}
 .asset-table a{color:var(--sn);text-decoration:none;font-weight:600}
+
+/* ── Error card ── */
+.err-card{background:rgba(255,54,33,0.06);border:1px solid rgba(255,54,33,0.2);border-radius:8px;padding:14px 16px;margin:8px 0}
+.err-card .err-msg{font-size:13px;color:var(--rose);font-family:var(--sans);margin-bottom:4px;line-height:1.5}
+.err-card .err-detail{font-size:10px;color:var(--txt3);font-family:var(--mono);word-break:break-all}
+
+/* ── Demo data badge ── */
+.demo-badge{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-family:var(--mono);color:var(--txt3);background:var(--ink2);border:1px solid var(--b2);border-radius:3px;padding:3px 8px;margin-left:8px;vertical-align:middle}
 
 /* ── Deep link pills ── */
 .deep-link{display:inline-flex;align-items:center;gap:4px;padding:6px 12px;background:var(--ink2);border:1px solid var(--b2);border-radius:6px;font-size:11px;font-family:var(--mono);color:var(--sn);text-decoration:none;margin:3px;transition:all .15s}
