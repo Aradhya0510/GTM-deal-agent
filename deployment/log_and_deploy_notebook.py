@@ -16,10 +16,10 @@ from mlflow.models.resources import (
 from databricks_langchain import UCFunctionToolkit, VectorSearchRetrieverTool
 from unitycatalog.ai.langchain.toolkit import UnityCatalogTool
 
-CATALOG = "users"                    # TODO: change to your catalog
-SCHEMA = "aradhya_chouhan"           # TODO: change to your schema
-LLM_ENDPOINT = "databricks-claude-sonnet-4-6"  # TODO: change to your LLM endpoint
-EXPERIMENT_NAME = "/Users/<your-username>/gtm-deal-intelligence"  # TODO: change
+CATALOG = ""           # CONFIGURE: your Unity Catalog catalog (see .env.example)
+SCHEMA = ""            # CONFIGURE: your Unity Catalog schema
+LLM_ENDPOINT = "databricks-claude-sonnet-4-6"  # CONFIGURE: your LLM endpoint
+EXPERIMENT_NAME = ""   # CONFIGURE: e.g. "/Users/you@company.com/experiment-name"
 MODEL_NAME = f"{CATALOG}.{SCHEMA}.gtm_deal_intelligence_agent"
 
 mlflow.set_experiment(EXPERIMENT_NAME)
@@ -51,9 +51,9 @@ deal_stories_retriever = VectorSearchRetrieverTool(
 
 all_tools = list(uc_toolkit.tools) + [transcript_retriever, battlecard_retriever, deal_stories_retriever]
 
-MEMORY_LLM_ENDPOINT = "databricks-claude-haiku-4-5"  # TODO: change to your memory extraction LLM
+MEMORY_LLM_ENDPOINT = "databricks-claude-haiku-4-5"  # CONFIGURE: memory extraction LLM
 EMBEDDING_ENDPOINT = "databricks-gte-large-en"
-SQL_WAREHOUSE_ID = ""  # TODO: set your SQL warehouse ID (for audit table)
+SQL_WAREHOUSE_ID = ""  # CONFIGURE: your SQL warehouse ID (for audit table)
 
 resources = [
     DatabricksServingEndpoint(endpoint_name=LLM_ENDPOINT),
@@ -81,7 +81,7 @@ print(f"Resources: {len(resources)}")
 
 model_info = mlflow.pyfunc.log_model(
     name="gtm_agent",
-    python_model="/Workspace/Users/<your-username>/<project>/agent.py",  # TODO: change path
+    python_model="",  # CONFIGURE: e.g. "/Workspace/Users/you@company.com/project/agent.py"
     resources=resources,
     pip_requirements=[
         "mlflow>=3.6.0",
@@ -112,9 +112,14 @@ deployment = deploy(
     model_name=MODEL_NAME,
     model_version=model_info.registered_model_version,
     environment_vars={
-        "LAKEBASE_INSTANCE_NAME": "",       # TODO: your Lakebase instance name
-        "LAKEBASE_PAT": "{{secrets/<your-scope>/<your-key>}}",  # TODO: your secret
-        "DATABRICKS_EMBEDDING_ENDPOINT": "databricks-gte-large-en",
+        "UC_CATALOG": CATALOG,
+        "UC_SCHEMA": SCHEMA,
+        "LLM_ENDPOINT": LLM_ENDPOINT,
+        "MEMORY_LLM_ENDPOINT": MEMORY_LLM_ENDPOINT,
+        "SQL_WAREHOUSE_ID": SQL_WAREHOUSE_ID,
+        "LAKEBASE_INSTANCE_NAME": "",       # CONFIGURE: your Lakebase instance name
+        "LAKEBASE_PAT": "{{secrets/scope/key}}",  # CONFIGURE: your secret ref
+        "DATABRICKS_EMBEDDING_ENDPOINT": EMBEDDING_ENDPOINT,
     },
 )
 

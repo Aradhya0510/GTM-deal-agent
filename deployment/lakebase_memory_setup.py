@@ -9,7 +9,7 @@
 
 # COMMAND ----------
 
-LAKEBASE_INSTANCE_NAME = ""  # TODO: set your Lakebase instance name
+LAKEBASE_INSTANCE_NAME = ""  # CONFIGURE: your Lakebase instance name (see .env.example)
 EMBEDDING_ENDPOINT = "databricks-gte-large-en"
 
 # COMMAND ----------

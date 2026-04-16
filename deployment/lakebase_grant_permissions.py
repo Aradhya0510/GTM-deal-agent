@@ -7,14 +7,14 @@
 
 # COMMAND ----------
 
-LAKEBASE_INSTANCE_NAME = ""  # TODO: set your Lakebase instance name
+LAKEBASE_INSTANCE_NAME = ""  # CONFIGURE: your Lakebase instance name (see .env.example)
 
-# TODO: Add the SP IDs that need access to your Lakebase instance.
-# Find them via: databricks api get /api/2.0/permissions/serving-endpoints/<endpoint-id>
+# CONFIGURE: Add SP IDs that need Postgres access.
+# Find them: databricks api get /api/2.0/permissions/serving-endpoints/<endpoint-id>
 PRINCIPALS = [
-    # "your-agent-sp-id",       # agents.deploy() SP (check Model Serving logs)
-    # "your-primary-app-sp-id", # primary app SP
-    # "your-showcase-app-sp-id", # showcase app SP
+    # "your-agent-sp-id",        # agents.deploy() SP (check Model Serving logs)
+    # "your-primary-app-sp-id",  # primary Databricks App SP
+    # "your-showcase-app-sp-id", # showcase Databricks App SP
 ]
 
 # COMMAND ----------

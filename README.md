@@ -170,7 +170,24 @@ cd servicenow-gtm-agent
 pip install -e ".[dev]"
 ```
 
-### Step 2: Configure CLI
+### Step 2: Configure Your Deployment
+
+All deployment-specific values are driven by environment variables. Copy the example config and fill in your values:
+
+```bash
+cp .env.example .env
+# Edit .env with your workspace URL, catalog, schema, instance names, etc.
+```
+
+The `.env.example` file documents every variable, which files use it, and where to set it (Model Serving env vars, Databricks Apps, or notebook edits).
+
+You will also need to edit these files directly (they run as Databricks notebooks, not as env-var-driven apps):
+- `deployment/log_and_deploy_notebook.py` — lines marked `CONFIGURE:`
+- `deployment/lakebase_memory_setup.py` — `LAKEBASE_INSTANCE_NAME`
+- `deployment/lakebase_grant_permissions.py` — `LAKEBASE_INSTANCE_NAME` + SP IDs
+- `showcase/app.yaml` — resource names
+
+### Step 3: Configure CLI
 
 ```bash
 databricks auth login --host https://<workspace>.cloud.databricks.com

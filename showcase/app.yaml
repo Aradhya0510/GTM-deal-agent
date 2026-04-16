@@ -3,13 +3,15 @@ command:
   - run
   - app.py
 
+# CONFIGURE: Replace resource names with your actual asset names.
+# See .env.example for the full list of required configuration.
 resources:
   - name: deal-intelligence-endpoint
     serving_endpoint:
-      name: ${SERVING_ENDPOINT_NAME}  # TODO: your agent serving endpoint name
+      name: your-serving-endpoint-name
       permission: CAN_QUERY
   - name: lakebase-memory
     database:
-      instance_name: ${LAKEBASE_INSTANCE_NAME}  # TODO: your Lakebase instance name
+      instance_name: your-lakebase-instance
       database_name: databricks_postgres
       permission: CAN_CONNECT_AND_CREATE

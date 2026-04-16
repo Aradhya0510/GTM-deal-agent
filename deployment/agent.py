@@ -40,8 +40,8 @@ from typing import Annotated, Generator, Sequence, TypedDict
 logger = logging.getLogger(__name__)
 
 # ── Configuration ────────────────────────────────────────────────────────
-CATALOG = os.environ.get("UC_CATALOG", "users")
-SCHEMA = os.environ.get("UC_SCHEMA", "aradhya_chouhan")
+CATALOG = os.environ.get("UC_CATALOG", "")
+SCHEMA = os.environ.get("UC_SCHEMA", "")
 LLM_ENDPOINT = os.environ.get("LLM_ENDPOINT", "databricks-claude-sonnet-4-6")
 MEMORY_LLM_ENDPOINT = os.environ.get("MEMORY_LLM_ENDPOINT", "databricks-claude-haiku-4-5")
 LAKEBASE_INSTANCE_NAME = os.environ.get("LAKEBASE_INSTANCE_NAME", "")

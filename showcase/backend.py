@@ -8,12 +8,12 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-ENDPOINT_NAME = os.environ.get("GTM_ENDPOINT", "")              # TODO: your serving endpoint name
-CATALOG = os.environ.get("UC_CATALOG", "users")                  # TODO: your catalog
-SCHEMA = os.environ.get("UC_SCHEMA", "")                         # TODO: your schema
-SQL_WAREHOUSE_ID = os.environ.get("SQL_WAREHOUSE_ID", "")        # TODO: your warehouse ID
-WORKSPACE_URL = os.environ.get("DATABRICKS_HOST", "")            # TODO: your workspace URL
-WORKSPACE_ID = os.environ.get("DATABRICKS_WORKSPACE_ID", "")     # TODO: your workspace ID
+ENDPOINT_NAME = os.environ.get("GTM_ENDPOINT", "")
+CATALOG = os.environ.get("UC_CATALOG", "")
+SCHEMA = os.environ.get("UC_SCHEMA", "")
+SQL_WAREHOUSE_ID = os.environ.get("SQL_WAREHOUSE_ID", "")
+WORKSPACE_URL = os.environ.get("DATABRICKS_HOST", "")
+WORKSPACE_ID = os.environ.get("DATABRICKS_WORKSPACE_ID", "")
 LAKEBASE_INSTANCE_NAME = os.environ.get("LAKEBASE_INSTANCE_NAME", "")
 EMBEDDING_ENDPOINT = os.environ.get("DATABRICKS_EMBEDDING_ENDPOINT", "databricks-gte-large-en")
 
