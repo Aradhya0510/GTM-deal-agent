@@ -474,15 +474,14 @@ st.markdown(HELIX_CSS, unsafe_allow_html=True)
 #  CONFIGURATION
 # ════════════════════════════════════════════════════════════════════════════
 
-ENDPOINT_NAME = os.environ.get(
-    "GTM_ENDPOINT", "agents_users-aradhya_chouhan-gtm_deal_intelligence_agent"
-)
-
-CATALOG = "users"
-SCHEMA = "aradhya_chouhan"
-SQL_WAREHOUSE_ID = "75fd8278393d07eb"
-WORKSPACE_URL = "https://e2-demo-west.cloud.databricks.com"
-WORKSPACE_ID = "2556758628403379"
+ENDPOINT_NAME = os.environ.get("GTM_ENDPOINT", "")
+CATALOG = os.environ.get("UC_CATALOG", "")
+SCHEMA = os.environ.get("UC_SCHEMA", "")
+SQL_WAREHOUSE_ID = os.environ.get("SQL_WAREHOUSE_ID", "")
+WORKSPACE_URL = os.environ.get("DATABRICKS_HOST", "")
+WORKSPACE_ID = os.environ.get("DATABRICKS_WORKSPACE_ID", "")
+VS_ENDPOINT_NAME = os.environ.get("VS_ENDPOINT_NAME", "")
+APP_URL = os.environ.get("APP_URL", "")
 BASE_URL = f"{WORKSPACE_URL}/?o={WORKSPACE_ID}"
 
 AE_PROFILES = {
@@ -530,9 +529,9 @@ ASSET_LINKS = {
     "memory_deal_decisions": f"{WORKSPACE_URL}/explore/data/{CATALOG}/{SCHEMA}/memory_deal_decisions?o={WORKSPACE_ID}",
     "experiment": f"{WORKSPACE_URL}/ml/experiments?searchFilter=name%3D%27gtm-deal-intelligence%27&o={WORKSPACE_ID}",
     "sql_warehouse": f"{WORKSPACE_URL}/sql/warehouses/{SQL_WAREHOUSE_ID}?o={WORKSPACE_ID}",
-    "vs_endpoint": f"{WORKSPACE_URL}/compute/vector-search/dbdemos_vs_endpoint?o={WORKSPACE_ID}",
+    "vs_endpoint": f"{WORKSPACE_URL}/compute/vector-search/{VS_ENDPOINT_NAME}?o={WORKSPACE_ID}",
     "gtm_accounts": f"{WORKSPACE_URL}/explore/data/{CATALOG}/{SCHEMA}/gtm_accounts?o={WORKSPACE_ID}",
-    "app": "https://gtm-deal-intelligence-2556758628403379.aws.databricksapps.com",
+    "app": APP_URL,
 }
 
 
@@ -1075,7 +1074,7 @@ with tab_arch:
         ("memory_deal_decisions", "[Lakebase]", "Decisions", "memory_deal_decisions"),
         ("gtm-deal-intelligence", "[Experiment]", "MLflow", "experiment"),
         ("Shared Endpoint", "[SQL Warehouse]", "Memory SQL", "sql_warehouse"),
-        ("dbdemos_vs_endpoint", "[VS Endpoint]", "VS compute", "vs_endpoint"),
+        (VS_ENDPOINT_NAME or "vs_endpoint", "[VS Endpoint]", "VS compute", "vs_endpoint"),
     ]
 
     table_rows = ""

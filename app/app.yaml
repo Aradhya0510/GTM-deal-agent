@@ -3,8 +3,12 @@ command:
   - run
   - app.py
 
+# CONFIGURE: Replace resource names with your actual asset names.
+# See .env.example at the repo root for the full list of required configuration.
+# For automated deployment that renders this file from .env, use:
+#   ./app/deploy.sh
 resources:
   - name: deal-intelligence-endpoint
     serving_endpoint:
-      name: agents_users-aradhya_chouhan-gtm_deal_intelligence_agent
+      name: your-serving-endpoint-name
       permission: CAN_QUERY
