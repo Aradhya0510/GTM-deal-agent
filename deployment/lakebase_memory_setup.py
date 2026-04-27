@@ -9,8 +9,15 @@
 
 # COMMAND ----------
 
-LAKEBASE_INSTANCE_NAME = ""  # CONFIGURE: your Lakebase instance name (see .env.example)
-EMBEDDING_ENDPOINT = "databricks-gte-large-en"
+# ── Configuration via notebook widgets ──
+# When run as a job, deployment/deploy_lakebase.sh populates these from .env.
+# When run interactively, set the widget values in the notebook UI.
+dbutils.widgets.text("LAKEBASE_INSTANCE_NAME", "")
+dbutils.widgets.text("DATABRICKS_EMBEDDING_ENDPOINT", "databricks-gte-large-en")
+
+LAKEBASE_INSTANCE_NAME = dbutils.widgets.get("LAKEBASE_INSTANCE_NAME")
+EMBEDDING_ENDPOINT = dbutils.widgets.get("DATABRICKS_EMBEDDING_ENDPOINT")
+assert LAKEBASE_INSTANCE_NAME, "LAKEBASE_INSTANCE_NAME widget must be set"
 
 # COMMAND ----------
 
