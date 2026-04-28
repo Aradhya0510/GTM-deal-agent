@@ -26,13 +26,45 @@ AE_PROFILES = {
 _sql_cache: dict[str, tuple[float, list[dict]]] = {}
 _SQL_CACHE_TTL = 60
 
-# Lakebase DatabricksStore for reading memory in the showcase app
+# Lakebase DatabricksStore for reading memory in the showcase app.
+#
+# Auth strategy: the App's Service Principal does not always get an
+# auto-provisioned Postgres role on its host Lakebase instance, which causes
+# `password authentication failed for user '<sp-uuid>'`. To work around that,
+# if LAKEBASE_PAT is provided (typically via a Databricks Secret resource
+# wired through app.yaml `valueFrom`), we use it to authenticate as the PAT
+# owner — same pattern the agent uses on Model Serving.
 _lakebase_store = None
 _LAKEBASE_READY = False
 try:
     from databricks_langchain import DatabricksStore
+    from databricks.sdk import WorkspaceClient as _LBWorkspaceClient
+    from databricks.sdk.config import Config as _LBConfig
+
+    _lb_kwargs = {"instance_name": LAKEBASE_INSTANCE_NAME}
+    _lakebase_token = os.environ.get("LAKEBASE_PAT")
+    _lakebase_host = os.environ.get("DATABRICKS_HOST", "")
+    if _lakebase_token:
+        # Force PAT auth explicitly. On Databricks Apps, DATABRICKS_CLIENT_ID
+        # and DATABRICKS_CLIENT_SECRET are auto-injected for the App SP, so
+        # the default WorkspaceClient resolver sees BOTH PAT and OAuth and
+        # raises "more than one authorization method configured". auth_type
+        # locks the resolver to PAT only.
+        _lb_cfg = _LBConfig(
+            host=_lakebase_host,
+            token=_lakebase_token,
+            auth_type="pat",
+            client_id=None,
+            client_secret=None,
+        )
+        _lb_wc = _LBWorkspaceClient(config=_lb_cfg)
+        _lb_kwargs["workspace_client"] = _lb_wc
+        logger.info("Showcase app: using explicit LAKEBASE_PAT for Lakebase auth")
+    else:
+        logger.info("Showcase app: using App SP for Lakebase auth (no LAKEBASE_PAT set)")
+
     _lakebase_store = DatabricksStore(
-        instance_name=LAKEBASE_INSTANCE_NAME,
+        **_lb_kwargs,
         embedding_endpoint=EMBEDDING_ENDPOINT,
         embedding_dims=1024,
     )

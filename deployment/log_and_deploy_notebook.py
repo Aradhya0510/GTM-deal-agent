@@ -8,6 +8,8 @@
 
 # COMMAND ----------
 
+import os
+
 import mlflow
 from mlflow.models.resources import (
     DatabricksServingEndpoint, DatabricksFunction, DatabricksVectorSearchIndex,
@@ -38,6 +40,21 @@ MODEL_NAME = f"{CATALOG}.{SCHEMA}.gtm_deal_intelligence_agent"
 
 assert CATALOG and SCHEMA, "UC_CATALOG and UC_SCHEMA widgets must be set"
 assert EXPERIMENT_NAME, "MLFLOW_EXPERIMENT_NAME widget must be set"
+
+# agent.py reads everything from os.environ. mlflow.pyfunc.log_model executes
+# agent.py to capture the model — without these env vars set, the agent's
+# UCFunctionToolkit and VectorSearchRetrieverTool initialize with empty fully
+# qualified names and fail at import time. Export everything before logging.
+os.environ["UC_CATALOG"] = CATALOG
+os.environ["UC_SCHEMA"] = SCHEMA
+os.environ["LLM_ENDPOINT"] = LLM_ENDPOINT
+os.environ["MEMORY_LLM_ENDPOINT"] = dbutils.widgets.get("MEMORY_LLM_ENDPOINT")
+os.environ["DATABRICKS_EMBEDDING_ENDPOINT"] = dbutils.widgets.get("DATABRICKS_EMBEDDING_ENDPOINT")
+os.environ["SQL_WAREHOUSE_ID"] = dbutils.widgets.get("SQL_WAREHOUSE_ID")
+os.environ["LAKEBASE_INSTANCE_NAME"] = dbutils.widgets.get("LAKEBASE_INSTANCE_NAME")
+# LAKEBASE_PAT is needed at log time only as a placeholder; real value is
+# substituted at serving time by Model Serving from the secret reference.
+os.environ.setdefault("LAKEBASE_PAT", "placeholder-for-log-time")
 
 mlflow.set_experiment(EXPERIMENT_NAME)
 print(f"Model: {MODEL_NAME}")
@@ -107,10 +124,11 @@ model_info = mlflow.pyfunc.log_model(
     pip_requirements=[
         "mlflow>=3.6.0",
         "databricks-langchain[memory]>=0.17.0",
-        "langgraph>=0.3",
+        "langgraph>=1.1.7",
         "langgraph-checkpoint-postgres>=2.0.5",
         "databricks-agents",
         "pydantic",
+        "unitycatalog-langchain[databricks]>=0.3.0",
     ],
     input_example={
         "input": [{"role": "user", "content": "What's the deal health on OPP-3001?"}]

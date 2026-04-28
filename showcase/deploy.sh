@@ -32,6 +32,8 @@ set +a
 : "${APP_WORKSPACE_PATH:?APP_WORKSPACE_PATH must be set in .env}"
 : "${GTM_ENDPOINT:?GTM_ENDPOINT must be set in .env}"
 : "${LAKEBASE_INSTANCE_NAME:?LAKEBASE_INSTANCE_NAME must be set in .env}"
+: "${LAKEBASE_PAT_SECRET_SCOPE:?LAKEBASE_PAT_SECRET_SCOPE must be set in .env}"
+: "${LAKEBASE_PAT_SECRET_KEY:?LAKEBASE_PAT_SECRET_KEY must be set in .env}"
 
 echo ">> Deploying app '$APP_NAME' using profile '$DATABRICKS_PROFILE'"
 echo ">> Workspace path: $APP_WORKSPACE_PATH"
@@ -57,6 +59,11 @@ resources:
       instance_name: ${LAKEBASE_INSTANCE_NAME}
       database_name: ${LAKEBASE_DATABASE_NAME:-databricks_postgres}
       permission: CAN_CONNECT_AND_CREATE
+  - name: lakebase-pat
+    secret:
+      scope: ${LAKEBASE_PAT_SECRET_SCOPE}
+      key: ${LAKEBASE_PAT_SECRET_KEY}
+      permission: READ
 
 env:
   - name: GTM_ENDPOINT
@@ -73,6 +80,8 @@ env:
     value: "${DATABRICKS_WORKSPACE_ID}"
   - name: LAKEBASE_INSTANCE_NAME
     value: "${LAKEBASE_INSTANCE_NAME}"
+  - name: LAKEBASE_PAT
+    valueFrom: lakebase-pat
   - name: DATABRICKS_EMBEDDING_ENDPOINT
     value: "${DATABRICKS_EMBEDDING_ENDPOINT:-databricks-gte-large-en}"
   - name: LLM_ENDPOINT

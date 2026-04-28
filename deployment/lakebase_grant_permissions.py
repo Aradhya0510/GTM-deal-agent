@@ -7,15 +7,21 @@
 
 # COMMAND ----------
 
-LAKEBASE_INSTANCE_NAME = ""  # CONFIGURE: your Lakebase instance name (see .env.example)
+dbutils.widgets.text("LAKEBASE_INSTANCE_NAME", "")
+dbutils.widgets.text("DATABASE_NAME", "databricks_postgres")
+dbutils.widgets.text("PG_SVC_USER", "gtm_agent_svc")
+dbutils.widgets.text("PG_SVC_PASSWORD", "LakebaseGTM2026!")
+dbutils.widgets.text("APP_SP_CLIENT_IDS", "")
 
-# CONFIGURE: Add SP IDs that need Postgres access.
-# Find them: databricks api get /api/2.0/permissions/serving-endpoints/<endpoint-id>
-PRINCIPALS = [
-    # "your-agent-sp-id",        # agents.deploy() SP (check Model Serving logs)
-    # "your-primary-app-sp-id",  # primary Databricks App SP
-    # "your-showcase-app-sp-id", # showcase Databricks App SP
-]
+LAKEBASE_INSTANCE_NAME = dbutils.widgets.get("LAKEBASE_INSTANCE_NAME")
+DATABASE_NAME = dbutils.widgets.get("DATABASE_NAME") or "databricks_postgres"
+PG_SVC_USER = dbutils.widgets.get("PG_SVC_USER") or "gtm_agent_svc"
+PG_SVC_PASSWORD = dbutils.widgets.get("PG_SVC_PASSWORD") or "LakebaseGTM2026!"
+APP_SP_CLIENT_IDS = [s.strip() for s in dbutils.widgets.get("APP_SP_CLIENT_IDS").split(",") if s.strip()]
+
+assert LAKEBASE_INSTANCE_NAME, "LAKEBASE_INSTANCE_NAME widget must be set"
+print(f"Granting on Lakebase instance: {LAKEBASE_INSTANCE_NAME}, database: {DATABASE_NAME}")
+print(f"App SP client IDs: {APP_SP_CLIENT_IDS}")
 
 # COMMAND ----------
 
@@ -48,21 +54,21 @@ print("CheckpointSaver tables created/verified")
 # COMMAND ----------
 
 from databricks_ai_bridge.lakebase import LakebasePool
-import psycopg
 
 pool = LakebasePool(instance_name=LAKEBASE_INSTANCE_NAME)
 
-# Create a pg_native_login service account for Model Serving
-# (agents.deploy() creates a NEW invisible SP per model version, so Databricks-auth fails)
-PG_SVC_USER = "gtm_agent_svc"
-PG_SVC_PASSWORD = "LakebaseGTM2026!"
-
+# Create a pg_native_login service account for Model Serving.
+# (agents.deploy() creates a NEW invisible SP per model version, so OAuth fails.)
 try:
     with pool.connection() as conn:
         conn.autocommit = True
         with conn.cursor() as cur:
-            cur.execute(f"DO $$ BEGIN CREATE ROLE {PG_SVC_USER} LOGIN PASSWORD '{PG_SVC_PASSWORD}'; EXCEPTION WHEN duplicate_object THEN ALTER ROLE {PG_SVC_USER} PASSWORD '{PG_SVC_PASSWORD}'; END $$;")
-            cur.execute(f"GRANT CONNECT ON DATABASE databricks_postgres TO {PG_SVC_USER};")
+            cur.execute(
+                f"DO $$ BEGIN CREATE ROLE {PG_SVC_USER} LOGIN PASSWORD '{PG_SVC_PASSWORD}'; "
+                f"EXCEPTION WHEN duplicate_object THEN ALTER ROLE {PG_SVC_USER} PASSWORD '{PG_SVC_PASSWORD}'; "
+                f"END $$;"
+            )
+            cur.execute(f'GRANT CONNECT ON DATABASE "{DATABASE_NAME}" TO {PG_SVC_USER};')
             cur.execute(f"GRANT USAGE, CREATE ON SCHEMA public TO {PG_SVC_USER};")
             cur.execute(f"GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {PG_SVC_USER};")
             cur.execute(f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {PG_SVC_USER};")
@@ -71,17 +77,54 @@ try:
 except Exception as e:
     print(f"Failed to create service user: {e}")
 
-# Also grant PUBLIC for any Databricks-authenticated connections
+# Grant PUBLIC for any Databricks-authenticated identities (including App SPs).
 try:
     with pool.connection() as conn:
         conn.autocommit = True
         with conn.cursor() as cur:
-            cur.execute("GRANT CONNECT ON DATABASE databricks_postgres TO PUBLIC;")
+            cur.execute(f'GRANT CONNECT ON DATABASE "{DATABASE_NAME}" TO PUBLIC;')
             cur.execute("GRANT USAGE, CREATE ON SCHEMA public TO PUBLIC;")
             cur.execute("GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO PUBLIC;")
             cur.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO PUBLIC;")
             print("Granted PUBLIC access")
 except Exception as e:
     print(f"Failed to grant PUBLIC: {e}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Create explicit Postgres roles for App Service Principals
+# MAGIC
+# MAGIC Databricks Apps SPs authenticate to Lakebase via OAuth tokens, but Postgres still
+# MAGIC needs a matching role to exist before it can validate the token. CAN_USE on the
+# MAGIC instance + PUBLIC grants is not enough — we must `CREATE ROLE` for each SP UUID.
+# MAGIC The role is created with LOGIN; Lakebase validates the OAuth token at connect
+# MAGIC time, not via a stored password.
+
+# COMMAND ----------
+
+if APP_SP_CLIENT_IDS:
+    try:
+        with pool.connection() as conn:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                for sp_id in APP_SP_CLIENT_IDS:
+                    role = sp_id  # Postgres role name = SP UUID (quoted)
+                    cur.execute(
+                        f"DO $$ BEGIN "
+                        f"  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') THEN "
+                        f"    CREATE ROLE \"{role}\" WITH LOGIN IN ROLE databricks_users; "
+                        f"  END IF; "
+                        f"END $$;"
+                    )
+                    cur.execute(f'GRANT CONNECT ON DATABASE "{DATABASE_NAME}" TO "{role}";')
+                    cur.execute(f'GRANT USAGE, CREATE ON SCHEMA public TO "{role}";')
+                    cur.execute(f'GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "{role}";')
+                    cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "{role}";')
+                    print(f"Provisioned Postgres role for App SP: {sp_id}")
+    except Exception as e:
+        print(f"Failed to provision App SP roles: {e}")
+else:
+    print("No APP_SP_CLIENT_IDS provided — skipping per-SP role creation")
 
 print("\nDone!")

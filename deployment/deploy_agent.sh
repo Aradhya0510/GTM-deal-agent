@@ -88,10 +88,11 @@ JOB_JSON=$(cat <<JSON
         "dependencies": [
           "mlflow>=3.6.0",
           "databricks-langchain[memory]>=0.17.0",
-          "langgraph>=0.3",
+          "langgraph>=1.1.7",
           "langgraph-checkpoint-postgres>=2.0.5",
           "databricks-agents",
-          "pydantic"
+          "pydantic",
+          "unitycatalog-langchain[databricks]>=0.3.0"
         ]
       }
     }
