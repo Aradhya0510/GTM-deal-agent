@@ -4,11 +4,18 @@
 # All subcommands read config from ./.env (gitignored) — see .env.example.
 #
 # Usage:
-#   ./deploy.sh showcase     — Mission Control showcase Streamlit app
-#   ./deploy.sh app          — Main GTM v2 Command Center Streamlit app
+#   ./deploy.sh bootstrap    — Provision UC catalog/schema/tables/functions/VS indexes
 #   ./deploy.sh agent        — Log + redeploy the agent to Model Serving
-#   ./deploy.sh lakebase     — Seed demo data into Lakebase Postgres
+#   ./deploy.sh lakebase     — Seed demo data into Lakebase Postgres memory
+#   ./deploy.sh app          — Main GTM v2 Command Center Streamlit app
+#   ./deploy.sh showcase     — Mission Control showcase Streamlit app
 #   ./deploy.sh all-apps     — Both Streamlit apps (showcase + main)
+#
+# Recommended order for a fresh workspace:
+#   1. ./deploy.sh bootstrap    (UC objects must exist before the agent logs)
+#   2. ./deploy.sh lakebase     (memory tables)
+#   3. ./deploy.sh agent        (log + register + deploy to Model Serving)
+#   4. ./deploy.sh app          (or showcase, or both via all-apps)
 #
 
 set -euo pipefail
@@ -22,10 +29,11 @@ usage() {
 
 [[ $# -eq 0 ]] && usage 1
 case "$1" in
-  showcase)  exec "$REPO_ROOT/showcase/deploy.sh" ;;
-  app)       exec "$REPO_ROOT/app/deploy.sh" ;;
+  bootstrap) exec "$REPO_ROOT/deployment/deploy_bootstrap.sh" ;;
   agent)     exec "$REPO_ROOT/deployment/deploy_agent.sh" ;;
   lakebase)  exec "$REPO_ROOT/deployment/deploy_lakebase.sh" ;;
+  app)       exec "$REPO_ROOT/app/deploy.sh" ;;
+  showcase)  exec "$REPO_ROOT/showcase/deploy.sh" ;;
   all-apps)
     "$REPO_ROOT/showcase/deploy.sh"
     "$REPO_ROOT/app/deploy.sh"
