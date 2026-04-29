@@ -5,17 +5,19 @@
 #
 # Usage:
 #   ./deploy.sh bootstrap    — Provision UC catalog/schema/tables/functions/VS indexes
-#   ./deploy.sh agent        — Log + redeploy the agent to Model Serving
 #   ./deploy.sh lakebase     — Seed demo data into Lakebase Postgres memory
+#   ./deploy.sh grants       — Apply Lakebase Postgres grants (per-SP roles)
+#   ./deploy.sh agent        — Log + redeploy the agent to Model Serving
 #   ./deploy.sh app          — Main GTM v2 Command Center Streamlit app
 #   ./deploy.sh showcase     — Mission Control showcase Streamlit app
 #   ./deploy.sh all-apps     — Both Streamlit apps (showcase + main)
 #
 # Recommended order for a fresh workspace:
 #   1. ./deploy.sh bootstrap    (UC objects must exist before the agent logs)
-#   2. ./deploy.sh lakebase     (memory tables)
+#   2. ./deploy.sh lakebase     (memory tables — DatabricksStore + CheckpointSaver)
 #   3. ./deploy.sh agent        (log + register + deploy to Model Serving)
-#   4. ./deploy.sh app          (or showcase, or both via all-apps)
+#   4. ./deploy.sh app          (or showcase, or both via all-apps) — creates the App SPs
+#   5. ./deploy.sh grants       (now that the App SPs exist, grant them Postgres access)
 #
 
 set -euo pipefail
@@ -30,8 +32,9 @@ usage() {
 [[ $# -eq 0 ]] && usage 1
 case "$1" in
   bootstrap) exec "$REPO_ROOT/deployment/deploy_bootstrap.sh" ;;
-  agent)     exec "$REPO_ROOT/deployment/deploy_agent.sh" ;;
   lakebase)  exec "$REPO_ROOT/deployment/deploy_lakebase.sh" ;;
+  grants)    exec "$REPO_ROOT/deployment/deploy_lakebase_grants.sh" ;;
+  agent)     exec "$REPO_ROOT/deployment/deploy_agent.sh" ;;
   app)       exec "$REPO_ROOT/app/deploy.sh" ;;
   showcase)  exec "$REPO_ROOT/showcase/deploy.sh" ;;
   all-apps)
