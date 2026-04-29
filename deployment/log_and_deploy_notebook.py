@@ -39,6 +39,20 @@ MODEL_NAME = f"{CATALOG}.{SCHEMA}.gtm_deal_intelligence_agent"
 assert CATALOG and SCHEMA, "UC_CATALOG and UC_SCHEMA widgets must be set"
 assert EXPERIMENT_NAME, "MLFLOW_EXPERIMENT_NAME widget must be set"
 
+# Export to os.environ so that agent.py — which reads UC_CATALOG / UC_SCHEMA at
+# module scope to construct {CATALOG}.{SCHEMA}.<tool> references — sees the
+# correct values when mlflow.pyfunc.log_model() introspects it by importing.
+# Without these exports, log_model fails with `GetFunction invalid full_name_arg`
+# because the f-strings resolve to "..calculate_deal_health" etc.
+import os
+os.environ["UC_CATALOG"] = CATALOG
+os.environ["UC_SCHEMA"] = SCHEMA
+os.environ["LLM_ENDPOINT"] = LLM_ENDPOINT
+os.environ["MEMORY_LLM_ENDPOINT"] = dbutils.widgets.get("MEMORY_LLM_ENDPOINT")
+os.environ["DATABRICKS_EMBEDDING_ENDPOINT"] = dbutils.widgets.get("DATABRICKS_EMBEDDING_ENDPOINT")
+os.environ["LAKEBASE_INSTANCE_NAME"] = dbutils.widgets.get("LAKEBASE_INSTANCE_NAME")
+os.environ["SQL_WAREHOUSE_ID"] = dbutils.widgets.get("SQL_WAREHOUSE_ID")
+
 mlflow.set_experiment(EXPERIMENT_NAME)
 print(f"Model: {MODEL_NAME}")
 
@@ -107,8 +121,14 @@ model_info = mlflow.pyfunc.log_model(
     pip_requirements=[
         "mlflow>=3.6.0",
         "databricks-langchain[memory]>=0.17.0",
-        "langgraph>=0.3",
+        # langgraph >= 1.1.7 required by databricks-langchain >= 0.19; older
+        # 0.x langgraph builds lack langgraph.runtime.ExecutionInfo and break
+        # the agent at import time.
+        "langgraph>=1.1.7",
         "langgraph-checkpoint-postgres>=2.0.5",
+        # Pulled in transitively in some envs but not all; pin explicitly so
+        # `from unitycatalog.ai.langchain.toolkit import UnityCatalogTool` works.
+        "unitycatalog-langchain[databricks]>=0.3.0",
         "databricks-agents",
         "pydantic",
     ],
