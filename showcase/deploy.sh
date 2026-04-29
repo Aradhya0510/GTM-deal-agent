@@ -33,14 +33,28 @@ set +a
 : "${GTM_ENDPOINT:?GTM_ENDPOINT must be set in .env}"
 : "${LAKEBASE_INSTANCE_NAME:?LAKEBASE_INSTANCE_NAME must be set in .env}"
 
+# Optional: PAT-based Lakebase auth. Mirrors the agent's Model Serving setup —
+# see CLAUDE.md learning #21 / DEPLOYMENT_NOTES.md §3.6. If both
+# LAKEBASE_PAT_SECRET_SCOPE and LAKEBASE_PAT_SECRET_KEY are set, we wire a
+# `secret` resource into app.yaml that exposes LAKEBASE_PAT to the app via
+# `valueFrom`. The showcase backend prefers PAT auth when LAKEBASE_PAT is
+# present and falls back to OAuth otherwise.
+WIRE_LAKEBASE_PAT="false"
+if [[ -n "${LAKEBASE_PAT_SECRET_SCOPE:-}" && -n "${LAKEBASE_PAT_SECRET_KEY:-}" ]]; then
+  WIRE_LAKEBASE_PAT="true"
+fi
+
 echo ">> Deploying app '$APP_NAME' using profile '$DATABRICKS_PROFILE'"
-echo ">> Workspace path: $APP_WORKSPACE_PATH"
+echo ">> Workspace path:    $APP_WORKSPACE_PATH"
+echo ">> Wire LAKEBASE_PAT: $WIRE_LAKEBASE_PAT"
 
 # Render app.yaml into a temp file with real resource names + env vars.
-# Databricks Apps supports `env:` with direct `value:` (not `value_from:`).
+# Databricks Apps supports `env:` with direct `value:` and (for secrets)
+# `valueFrom: <resource-name>`.
 RENDERED_YAML="$(mktemp -t mc-app-yaml.XXXXXX)"
 trap 'rm -f "$RENDERED_YAML"' EXIT
 
+# Base resources (always present)
 cat > "$RENDERED_YAML" <<YAML
 command:
   - streamlit
@@ -57,6 +71,20 @@ resources:
       instance_name: ${LAKEBASE_INSTANCE_NAME}
       database_name: ${LAKEBASE_DATABASE_NAME:-databricks_postgres}
       permission: CAN_CONNECT_AND_CREATE
+YAML
+
+# Optional: secret resource for LAKEBASE_PAT
+if [[ "$WIRE_LAKEBASE_PAT" == "true" ]]; then
+  cat >> "$RENDERED_YAML" <<YAML
+  - name: lakebase-pat
+    secret:
+      scope: ${LAKEBASE_PAT_SECRET_SCOPE}
+      key: ${LAKEBASE_PAT_SECRET_KEY}
+      permission: READ
+YAML
+fi
+
+cat >> "$RENDERED_YAML" <<YAML
 
 env:
   - name: GTM_ENDPOINT
@@ -82,6 +110,13 @@ env:
   - name: MLFLOW_EXPERIMENT_NAME
     value: "${MLFLOW_EXPERIMENT_NAME}"
 YAML
+
+if [[ "$WIRE_LAKEBASE_PAT" == "true" ]]; then
+  cat >> "$RENDERED_YAML" <<YAML
+  - name: LAKEBASE_PAT
+    valueFrom: lakebase-pat
+YAML
+fi
 
 echo ">> Rendered app.yaml:"
 sed 's/^/   /' "$RENDERED_YAML"
@@ -121,3 +156,34 @@ databricks --profile "$DATABRICKS_PROFILE" apps deploy "$APP_NAME" \
 echo ""
 echo ">> Done. Check status with:"
 echo "     databricks --profile $DATABRICKS_PROFILE apps get $APP_NAME"
+
+if [[ "$WIRE_LAKEBASE_PAT" == "true" ]]; then
+  cat <<EOF
+
+──────────────────────────────────────────────────────────────────────────────
+NOTE: LAKEBASE_PAT secret resource was rendered into app.yaml.
+
+Databricks Apps quirk: \`apps deploy\` ships source files and the new app.yaml
+text but DOES NOT update the App's stored \`resources:\` array. If this is the
+first time the secret resource is being added, the app will start up but log:
+   "error resolving resource lakebase-pat for env LAKEBASE_PAT: resource
+    lakebase-pat not found"
+
+To attach the new resource, run \`apps update\` once — the Databricks CLI will
+read app.yaml from the deployed source path and patch the resource list:
+
+  databricks --profile $DATABRICKS_PROFILE apps update $APP_NAME \\
+      --source-code-path $APP_WORKSPACE_PATH
+
+Plus the App SP needs READ on the secret scope (one-time, idempotent):
+
+  SP_ID=\$(databricks --profile $DATABRICKS_PROFILE apps get $APP_NAME |
+           python3 -c 'import json,sys; print(json.load(sys.stdin)["service_principal_client_id"])')
+  databricks --profile $DATABRICKS_PROFILE secrets put-acl \\
+      $LAKEBASE_PAT_SECRET_SCOPE \$SP_ID READ
+
+After both, future \`apps deploy\` runs are sufficient — only NEW resources
+need the \`apps update\` step.
+──────────────────────────────────────────────────────────────────────────────
+EOF
+fi

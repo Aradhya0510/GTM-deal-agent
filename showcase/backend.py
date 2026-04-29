@@ -26,16 +26,55 @@ AE_PROFILES = {
 _sql_cache: dict[str, tuple[float, list[dict]]] = {}
 _SQL_CACHE_TTL = 60
 
-# Lakebase DatabricksStore for reading memory in the showcase app
+# Lakebase DatabricksStore for reading memory in the showcase app.
+#
+# Auth strategy mirrors deployment/agent.py: prefer an explicit PAT when
+# LAKEBASE_PAT is set in the environment, fall back to auto-detected OAuth
+# otherwise.
+#
+# The PAT path matters because on some Lakebase instances the App service
+# principal does not get an auto-provisioned `databricks_writer_<id>` role
+# in Postgres, so OAuth tokens minted by
+# `WorkspaceClient.database.generate_database_credential()` fail to
+# authenticate. Falling back to a PAT (whose owner is a real user with a
+# real Lakebase-managed role) is the universal workaround. See CLAUDE.md
+# learning #21 and DEPLOYMENT_NOTES.md §3.6.
+#
+# Critical: on Databricks Apps, DATABRICKS_CLIENT_ID and
+# DATABRICKS_CLIENT_SECRET are auto-injected for the App SP. A bare
+# `WorkspaceClient(host=..., token=PAT)` raises:
+#     validate: more than one authorization method configured: oauth and pat
+# We force `auth_type="pat"` and null out the OAuth fields explicitly so the
+# SDK picks the PAT we just supplied instead of the auto-detected OAuth.
 _lakebase_store = None
 _LAKEBASE_READY = False
 try:
     from databricks_langchain import DatabricksStore
-    _lakebase_store = DatabricksStore(
-        instance_name=LAKEBASE_INSTANCE_NAME,
-        embedding_endpoint=EMBEDDING_ENDPOINT,
-        embedding_dims=1024,
-    )
+    from databricks.sdk import WorkspaceClient as _LBWorkspaceClient
+
+    _store_kwargs = {
+        "instance_name": LAKEBASE_INSTANCE_NAME,
+        "embedding_endpoint": EMBEDDING_ENDPOINT,
+        "embedding_dims": 1024,
+    }
+
+    _lakebase_pat = os.environ.get("LAKEBASE_PAT")
+    if _lakebase_pat:
+        from databricks.sdk.config import Config as _LBConfig
+
+        _lb_cfg = _LBConfig(
+            host=os.environ.get("DATABRICKS_HOST", ""),
+            token=_lakebase_pat,
+            auth_type="pat",
+            client_id=None,
+            client_secret=None,
+        )
+        _store_kwargs["workspace_client"] = _LBWorkspaceClient(config=_lb_cfg)
+        logger.info("Showcase app using explicit PAT for Lakebase auth (auth_type=pat)")
+    else:
+        logger.info("Showcase app using auto-detected (OAuth) auth for Lakebase")
+
+    _lakebase_store = DatabricksStore(**_store_kwargs)
     _LAKEBASE_READY = True
     logger.info("Showcase app connected to Lakebase instance: %s", LAKEBASE_INSTANCE_NAME)
 except Exception as e:
